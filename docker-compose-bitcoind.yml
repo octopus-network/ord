@@ -1,0 +1,20 @@
+version: '3'
+services:
+  bitcoind-node:
+    image: octopus-network/bitcoind:latest
+    container_name: ord-bitcoind-node
+    volumes:
+      - /bitcoind-data:/bitcoin/.bitcoin
+    ports:
+      - "18333:18333"
+      - "18332:18332"
+    command:
+      - bitcoind
+      - -txindex
+      - -chain=test
+      - -server
+      - -rpcallowip=0.0.0.0/0
+      - -rpcport=18332
+      - -rpcbind=0.0.0.0
+      - -rpcpassword=ordpwd
+      - -rpcuser=orduser

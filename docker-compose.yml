@@ -1,0 +1,35 @@
+version: '3'
+services:
+  ord:
+    image: ordinals/ord
+    container_name: ord-node
+    volumes:
+      - ~/.local/share/ord:/ordinals:rw
+      - /bitcoind-data:/root/bitcoind-data:rw
+    environment:
+      RUST_LOG: "INFO"
+      RUST_BACKTRACE: "FULL"
+    ports:
+      - "8080:8080"
+    command:
+      - ord
+      - --bitcoin-data-dir
+      - "/root/bitcoind-data"
+      - --bitcoin-rpc-pass
+      - "ordpwd"
+      - --bitcoin-rpc-user
+      - "orduser"
+      - --data-dir
+      - "/ordinals/index-data"
+      - --rpc-url
+      - "http://ord-bitcoind-node:18332"
+      - --cookie-file
+      - "/root/bitcoind-data/testnet3/.cookie"
+      - --index-runes
+      - -n
+      - -t
+      - server
+      - --http
+      - --http-port
+      - "8080"
+      - -j
