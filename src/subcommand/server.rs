@@ -15,7 +15,7 @@ use {
       PreviewAudioHtml, PreviewCodeHtml, PreviewFontHtml, PreviewImageHtml, PreviewMarkdownHtml,
       PreviewModelHtml, PreviewPdfHtml, PreviewTextHtml, PreviewUnknownHtml, PreviewVideoHtml,
       RangeHtml, RareTxt, RuneHtml, RuneJson, RunesHtml, RunesJson, SatHtml, SatInscriptionJson,
-      SatInscriptionsJson, SatJson, TransactionHtml,
+      SatInscriptionsJson, SatJson, TransactionHtml, TransactionJson,
     },
   },
   axum::{
@@ -44,7 +44,6 @@ use {
     set_header::SetResponseHeaderLayer,
   },
 };
-
 mod accept_encoding;
 mod accept_json;
 mod error;
@@ -764,7 +763,8 @@ impl Server {
     Extension(server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
     Path(txid): Path<Txid>,
-  ) -> ServerResult<PageHtml<TransactionHtml>> {
+    AcceptJson(accept_json): AcceptJson,
+  ) -> ServerResult<Response> {
     task::block_in_place(|| {
       let transaction = index
         .get_transaction(txid)?
@@ -774,7 +774,17 @@ impl Server {
 
       let blockhash = index.get_transaction_blockhash(txid)?;
 
-      Ok(
+      Ok(if accept_json {
+        Json(TransactionJson::new(
+          blockhash,
+          server_config.chain,
+          index.get_etching(txid)?,
+          inscription_count,
+          transaction,
+          txid,
+        ))
+        .into_response()
+      } else {
         TransactionHtml {
           blockhash,
           transaction,
@@ -783,8 +793,9 @@ impl Server {
           chain: server_config.chain,
           etching: index.get_etching(txid)?,
         }
-        .page(server_config),
-      )
+        .page(server_config)
+        .into_response()
+      })
     })
   }
 
