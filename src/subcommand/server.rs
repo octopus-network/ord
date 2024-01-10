@@ -774,27 +774,28 @@ impl Server {
 
       let blockhash = index.get_transaction_blockhash(txid)?;
 
-    Ok(if accept_json {
-      Json(TransactionJson::new(
-        blockhash,
-        server_config.chain,
-        index.get_etching(txid)?,
-        inscription_count,
-        transaction,
-        txid,
-      ))
-      .into_response()
-    } else {
-      TransactionHtml {
-        blockhash,
-        transaction,
-        txid,
-        inscription_count,
-        chain: server_config.chain,
-        etching: index.get_etching(txid)?,
-      }
-      .page(server_config)
-      .into_response()
+      Ok(if accept_json {
+        Json(TransactionJson::new(
+          blockhash,
+          server_config.chain,
+          index.get_etching(txid)?,
+          inscription_count,
+          transaction,
+          txid,
+        ))
+        .into_response()
+      } else {
+        TransactionHtml {
+          blockhash,
+          transaction,
+          txid,
+          inscription_count,
+          chain: server_config.chain,
+          etching: index.get_etching(txid)?,
+        }
+        .page(server_config)
+        .into_response()
+      })
     })
   }
 
