@@ -1,8 +1,18 @@
 use super::*;
 
+const TAG_BODY: u128 = 0;
+const TAG_DIVISIBILITY: u128 = 1;
+const TAG_RUNE: u128 = 2;
+const TAG_SYMBOL: u128 = 3;
+const TAG_LIMIT: u128 = 4;
+const TAG_TERM: u128 = 6;
+
+#[allow(unused)]
+const TAG_BURN: u128 = 256;
+
 const MAX_SPACERS: u32 = 0b00000111_11111111_11111111_11111111;
 
-#[derive(Default, Serialize, Debug, PartialEq)]
+#[derive(Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct Runestone {
   pub edicts: Vec<Edict>,
   pub etching: Option<Etching>,
@@ -61,62 +71,30 @@ impl Runestone {
 
     let Message { mut fields, edicts } = Message::from_integers(&integers);
 
-    let deadline = Tag::Deadline
-      .take(&mut fields)
-      .and_then(|deadline| u32::try_from(deadline).ok());
-
-    let default_output = Tag::DefaultOutput
-      .take(&mut fields)
-      .and_then(|default| u32::try_from(default).ok());
-
-    let divisibility = Tag::Divisibility
-      .take(&mut fields)
-      .and_then(|divisibility| u8::try_from(divisibility).ok())
-      .and_then(|divisibility| (divisibility <= MAX_DIVISIBILITY).then_some(divisibility))
-      .unwrap_or_default();
-
-    let limit = Tag::Limit
-      .take(&mut fields)
-      .and_then(|limit| (limit <= MAX_LIMIT).then_some(limit));
-
-    let rune = Tag::Rune.take(&mut fields).map(Rune);
-
-    let spacers = Tag::Spacers
-      .take(&mut fields)
-      .and_then(|spacers| u32::try_from(spacers).ok())
-      .and_then(|spacers| (spacers <= MAX_SPACERS).then_some(spacers))
-      .unwrap_or_default();
-
-    let symbol = Tag::Symbol
-      .take(&mut fields)
-      .and_then(|symbol| u32::try_from(symbol).ok())
-      .and_then(char::from_u32);
-
-    let term = Tag::Term
-      .take(&mut fields)
-      .and_then(|term| u32::try_from(term).ok());
-
-    let mut flags = Tag::Flags.take(&mut fields).unwrap_or_default();
-
-    let etch = Flag::Etch.take(&mut flags);
-
-    let etching = if etch {
-      Some(Etching {
-        deadline,
-        divisibility,
-        limit,
-        rune,
-        spacers,
-        symbol,
-        term,
-      })
-    } else {
-      None
-    };
+    let etching = fields.remove(&TAG_RUNE).map(|rune| Etching {
+      deadline: None,
+      divisibility: fields
+        .remove(&TAG_DIVISIBILITY)
+        .and_then(|divisibility| u8::try_from(divisibility).ok())
+        .and_then(|divisibility| (divisibility <= MAX_DIVISIBILITY).then_some(divisibility))
+        .unwrap_or_default(),
+      limit: fields
+        .remove(&TAG_LIMIT)
+        .and_then(|limit| (limit <= MAX_LIMIT).then_some(limit)),
+      rune: Some(Rune(rune)),
+      spacers: 0,
+      symbol: fields
+        .remove(&TAG_SYMBOL)
+        .and_then(|symbol| u32::try_from(symbol).ok())
+        .and_then(char::from_u32),
+      term: fields
+        .remove(&TAG_TERM)
+        .and_then(|term| u32::try_from(term).ok()),
+    });
 
     Ok(Some(Self {
-      burn: flags != 0 || fields.keys().any(|tag| tag % 2 == 0),
-      default_output,
+      burn: fields.keys().any(|tag| tag % 2 == 0),
+      default_output: None,
       edicts,
       etching,
     }))
