@@ -1,4 +1,10 @@
 use super::*;
+use crate::runes::Runestone;
+use bitcoin::hashes::hex::FromHex;
+use bitcoincore_rpc::bitcoincore_rpc_json::{
+  serde_hex, GetRawTransactionResultVinScriptSig, GetRawTransactionResultVoutScriptPubKey,
+};
+use serde::de::Error;
 
 pub type TransactionJson = TransactionHtml;
 
@@ -15,6 +21,75 @@ impl PageContent for TransactionHtml {
   fn title(&self) -> String {
     format!("Transaction {}", self.txid)
   }
+}
+
+// Custom deserializer functions.
+
+/// deserialize_hex_array_opt deserializes a vector of hex-encoded byte arrays.
+fn deserialize_hex_array_opt<'de, D>(deserializer: D) -> Result<Option<Vec<Vec<u8>>>, D::Error>
+where
+  D: serde::Deserializer<'de>,
+{
+  //TODO(stevenroose) Revisit when issue is fixed:
+  // https://github.com/serde-rs/serde/issues/723
+
+  let v: Vec<String> = Vec::deserialize(deserializer)?;
+  let mut res = Vec::new();
+  for h in v.into_iter() {
+    res.push(FromHex::from_hex(&h).map_err(D::Error::custom)?);
+  }
+  Ok(Some(res))
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawTransactionResultVin {
+  pub sequence: u32,
+  /// The raw scriptSig in case of a coinbase tx.
+  #[serde(default, with = "serde_hex::opt")]
+  pub coinbase: Option<Vec<u8>>,
+  /// Not provided for coinbase txs.
+  pub txid: Option<bitcoin::Txid>,
+  /// Not provided for coinbase txs.
+  pub vout: Option<u32>,
+  /// The scriptSig in case of a non-coinbase tx.
+  pub script_sig: Option<GetRawTransactionResultVinScriptSig>,
+  /// Not provided for coinbase txs.
+  #[serde(default, deserialize_with = "deserialize_hex_array_opt")]
+  pub txinwitness: Option<Vec<Vec<u8>>>,
+  pub rune_balances: Vec<(SpacedRune, Pile)>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawTransactionResultVout {
+  #[serde(with = "bitcoin::amount::serde::as_btc")]
+  pub value: Amount,
+  pub n: u32,
+  pub script_pub_key: GetRawTransactionResultVoutScriptPubKey,
+  pub rune_balances: Vec<(SpacedRune, Pile)>,
+  pub runestone: Option<Runestone>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawTransactionResult {
+  #[serde(rename = "in_active_chain")]
+  pub in_active_chain: Option<bool>,
+  #[serde(with = "serde_hex")]
+  pub hex: Vec<u8>,
+  pub txid: bitcoin::Txid,
+  pub hash: bitcoin::Wtxid,
+  pub size: usize,
+  pub vsize: usize,
+  pub version: u32,
+  pub locktime: u32,
+  pub vin: Vec<RawTransactionResultVin>,
+  pub vout: Vec<RawTransactionResultVout>,
+  pub blockhash: Option<bitcoin::BlockHash>,
+  pub confirmations: Option<u32>,
+  pub time: Option<usize>,
+  pub blocktime: Option<usize>,
 }
 
 #[cfg(test)]

@@ -14,7 +14,10 @@ use {
     templates::StatusHtml,
   },
   bitcoin::block::Header,
-  bitcoincore_rpc::{json::GetBlockHeaderResult, Client},
+  bitcoincore_rpc::{
+    json::{GetBlockHeaderResult, GetRawTransactionResult},
+    Client,
+  },
   chrono::SubsecRound,
   indicatif::{ProgressBar, ProgressStyle},
   log::log_enabled,
@@ -1110,6 +1113,8 @@ impl Index {
     let rtx = self.database.begin_read()?;
 
     let transaction_id_to_rune = rtx.open_table(TRANSACTION_ID_TO_RUNE)?;
+    // println!("ys-debug: len: {:?}", transaction_id_to_rune.len());
+    // println!("ys-debug: next: {:#?}", transaction_id_to_rune);
     let Some(rune) = transaction_id_to_rune.get(&txid.store())? else {
       return Ok(None);
     };
@@ -1119,6 +1124,10 @@ impl Index {
 
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let entry = rune_id_to_rune_entry.get(&id.value())?.unwrap();
+    println!("ys-debug: entry: {:?}", entry.value());
+
+    let rune = RuneEntry::load(entry.value());
+    println!("ys-debug: rune: {:?}", rune);
 
     Ok(Some(RuneEntry::load(entry.value()).spaced_rune()))
   }
@@ -1356,6 +1365,13 @@ impl Index {
     }
 
     self.client.get_raw_transaction(&txid, None).into_option()
+  }
+
+  pub(crate) fn get_raw_transaction_info(&self, txid: Txid) -> Result<GetRawTransactionResult> {
+    self
+      .client
+      .get_raw_transaction_info(&txid, None)
+      .map_err(|err| err.into())
   }
 
   pub(crate) fn find(&self, sat: Sat) -> Result<Option<SatPoint>> {
