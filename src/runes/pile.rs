@@ -1,6 +1,7 @@
 use super::*;
 
-pub(crate) struct Pile {
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct Pile {
   pub(crate) amount: u128,
   pub(crate) divisibility: u8,
   pub(crate) symbol: Option<char>,

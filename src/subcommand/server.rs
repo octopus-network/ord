@@ -1,3 +1,7 @@
+use crate::templates::transaction::{
+  RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
+};
+
 use {
   self::{
     accept_encoding::AcceptEncoding,
@@ -273,6 +277,7 @@ impl Server {
         .route("/static/*path", get(Self::static_asset))
         .route("/status", get(Self::status))
         .route("/tx/:txid", get(Self::transaction))
+        .route("/api/transation/:txid", get(Self::api_transaction))
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
         .layer(Extension(config))
@@ -787,6 +792,9 @@ impl Server {
       let transaction = index
         .get_transaction(txid)?
         .ok_or_not_found(|| format!("transaction {txid}"))?;
+
+      let runestone = Runestone::from_transaction(&transaction);
+      println!("ys-debug: transation: {:?}", runestone);
 
       let inscription_count = index.inscription_count(txid)?;
 
@@ -1593,6 +1601,69 @@ impl Server {
       let id = index.get_inscription_id_by_sat_indexed(sat, inscription_index)?;
 
       Ok(Json(SatInscriptionJson { id }))
+    })
+  }
+
+  async fn api_transaction(
+    Extension(index): Extension<Arc<Index>>,
+    Path(txid): Path<Txid>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| {
+      let transaction = index.get_raw_transaction_info(txid)?;
+      let a = index.get_etching(txid);
+      println!("ys-debug: {:?}", a);
+      let mut result = RawTransactionResult {
+        in_active_chain: transaction.in_active_chain,
+        hex: transaction.hex.clone(),
+        txid: transaction.txid,
+        hash: transaction.hash,
+        size: transaction.size,
+        vsize: transaction.vsize,
+        version: transaction.version,
+        locktime: transaction.locktime,
+        vin: vec![],
+        vout: vec![],
+        blockhash: transaction.blockhash,
+        confirmations: transaction.confirmations,
+        time: transaction.time,
+        blocktime: transaction.blocktime,
+      };
+
+      for vin in transaction.vin.iter() {
+        let outpoint = OutPoint::new(vin.txid.unwrap(), vin.vout.unwrap());
+        let runes = index.get_rune_balances_for_outpoint(outpoint)?;
+        // let spent = index.is_output_spent(outpoint)?;
+        result.vin.push(RawTransactionResultVin {
+          sequence: vin.sequence,
+          coinbase: vin.coinbase.clone(),
+          txid: vin.txid,
+          vout: vin.vout,
+          script_sig: vin.script_sig.clone(),
+          txinwitness: vin.txinwitness.clone(),
+          rune_balances: runes,
+        });
+      }
+      for vout in transaction.vout.iter() {
+        let outpoint = OutPoint::new(txid, vout.n);
+        let runes = index.get_rune_balances_for_outpoint(outpoint)?;
+        // let spent = index.is_output_spent(outpoint)?;
+
+        let mut rtrv = RawTransactionResultVout {
+          value: vout.value,
+          n: vout.n,
+          script_pub_key: vout.script_pub_key.clone(),
+          rune_balances: runes,
+          runestone: None,
+        };
+
+        if vout.script_pub_key.script().unwrap().is_op_return() {
+          let runestone = Runestone::from_transaction(&transaction.transaction().unwrap());
+          rtrv.runestone = runestone;
+        }
+        result.vout.push(rtrv);
+      }
+
+      Ok(Json(result).into_response())
     })
   }
 

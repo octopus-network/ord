@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Default, Serialize, Debug, PartialEq, Copy, Clone)]
+#[derive(Default, Deserialize, Serialize, Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Edict {
   pub id: u128,
   pub amount: u128,
