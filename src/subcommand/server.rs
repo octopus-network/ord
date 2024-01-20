@@ -1630,7 +1630,10 @@ impl Server {
       };
 
       for vin in transaction.vin.iter() {
-        let outpoint = OutPoint::new(vin.txid.unwrap(), vin.vout.unwrap());
+        let outpoint = OutPoint::new(
+          vin.txid.ok_or(anyhow::anyhow!("Vin tix id is empty"))?,
+          vin.vout.ok_or(anyhow::anyhow!("Vin vout is empty"))?,
+        );
         let runes = index.get_rune_balances_for_outpoint(outpoint)?;
         // let spent = index.is_output_spent(outpoint)?;
         result.vin.push(RawTransactionResultVin {
@@ -1656,8 +1659,15 @@ impl Server {
           runestone: None,
         };
 
-        if vout.script_pub_key.script().unwrap().is_op_return() {
-          let runestone = Runestone::from_transaction(&transaction.transaction().unwrap());
+        if vout
+          .script_pub_key
+          .script()
+          .map_err(|e| anyhow::anyhow!(e))?
+          .is_op_return()
+        {
+          let runestone = Runestone::from_transaction(
+            &transaction.transaction().map_err(|e| anyhow::anyhow!(e))?,
+          );
           rtrv.runestone = runestone;
         }
         result.vout.push(rtrv);
