@@ -277,7 +277,7 @@ impl Server {
         .route("/static/*path", get(Self::static_asset))
         .route("/status", get(Self::status))
         .route("/tx/:txid", get(Self::transaction))
-        .route("/api/transation/:txid", get(Self::api_transaction))
+        .route("/api/transaction/:txid", get(Self::api_transaction))
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
         .layer(Extension(config))
