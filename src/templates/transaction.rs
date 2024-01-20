@@ -52,6 +52,8 @@ pub struct RawTransactionResultVin {
   pub txid: Option<bitcoin::Txid>,
   /// Not provided for coinbase txs.
   pub vout: Option<u32>,
+  #[serde(with = "bitcoin::amount::serde::as_btc")]
+  pub value: Amount,
   /// The scriptSig in case of a non-coinbase tx.
   pub script_sig: Option<GetRawTransactionResultVinScriptSig>,
   /// Not provided for coinbase txs.

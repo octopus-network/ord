@@ -62,6 +62,8 @@ macro_rules! define_multimap_table {
 define_multimap_table! { SATPOINT_TO_SEQUENCE_NUMBER, &SatPointValue, u32 }
 define_multimap_table! { SAT_TO_SEQUENCE_NUMBER, u64, u32 }
 define_multimap_table! { SEQUENCE_NUMBER_TO_CHILDREN, u32, u32 }
+define_multimap_table! { RUNE_TO_TRANSACTION_ID, u128, &TxidValue }
+define_multimap_table! { RUNE_TO_OUTPOINT, u128, &OutPointValue }
 define_table! { HEIGHT_TO_BLOCK_HEADER, u32, &HeaderValue }
 define_table! { HEIGHT_TO_LAST_SEQUENCE_NUMBER, u32, u32 }
 define_table! { HOME_INSCRIPTIONS, u32, InscriptionIdValue }
@@ -317,6 +319,8 @@ impl Index {
         tx.open_multimap_table(SATPOINT_TO_SEQUENCE_NUMBER)?;
         tx.open_multimap_table(SAT_TO_SEQUENCE_NUMBER)?;
         tx.open_multimap_table(SEQUENCE_NUMBER_TO_CHILDREN)?;
+        tx.open_multimap_table(RUNE_TO_TRANSACTION_ID)?;
+        tx.open_multimap_table(RUNE_TO_OUTPOINT)?;
         tx.open_table(HEIGHT_TO_BLOCK_HEADER)?;
         tx.open_table(HEIGHT_TO_LAST_SEQUENCE_NUMBER)?;
         tx.open_table(HOME_INSCRIPTIONS)?;
@@ -1978,6 +1982,64 @@ impl Index {
         .map(|(_sequence_number, satpoint, inscription_id)| (satpoint, inscription_id))
         .collect(),
     )
+  }
+
+  pub(crate) fn get_transactions_paginated(
+    &self,
+    rune: Rune,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<Txid>, bool)> {
+    let rtx = self.database.begin_read()?;
+
+    let mut ids = rtx
+      .open_multimap_table(RUNE_TO_TRANSACTION_ID)?
+      .get(rune.0)?
+      .skip(page_index.saturating_mul(page_size).try_into().unwrap())
+      .take(page_size.saturating_add(1).try_into().unwrap())
+      .map(|result| {
+        result
+          .and_then(|id| Ok(Txid::load(*id.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<Txid>>>()?;
+
+    let more = ids.len() > page_size;
+
+    if more {
+      ids.pop();
+    }
+
+    Ok((ids, more))
+  }
+
+  pub(crate) fn get_outpoints_paginated(
+    &self,
+    rune: Rune,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<OutPoint>, bool)> {
+    let rtx = self.database.begin_read()?;
+
+    let mut outpoints = rtx
+      .open_multimap_table(RUNE_TO_OUTPOINT)?
+      .get(rune.0)?
+      .skip(page_index.saturating_mul(page_size).try_into().unwrap())
+      .take(page_size.saturating_add(1).try_into().unwrap())
+      .map(|result| {
+        result
+          .and_then(|op| Ok(OutPoint::load(*op.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<OutPoint>>>()?;
+
+    let more = outpoints.len() > page_size;
+
+    if more {
+      outpoints.pop();
+    }
+
+    Ok((outpoints, more))
   }
 }
 

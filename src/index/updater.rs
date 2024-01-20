@@ -588,6 +588,8 @@ impl<'index> Updater<'_> {
       let mut rune_to_rune_id = wtx.open_table(RUNE_TO_RUNE_ID)?;
       let mut sequence_number_to_rune_id = wtx.open_table(SEQUENCE_NUMBER_TO_RUNE_ID)?;
       let mut transaction_id_to_rune = wtx.open_table(TRANSACTION_ID_TO_RUNE)?;
+      let mut rune_to_transaction_id = wtx.open_multimap_table(RUNE_TO_TRANSACTION_ID)?;
+      let mut rune_to_outpoint = wtx.open_multimap_table(RUNE_TO_OUTPOINT)?;
 
       let runes = statistic_to_count
         .get(&Statistic::Runes.into())?
@@ -606,6 +608,8 @@ impl<'index> Updater<'_> {
         statistic_to_count: &mut statistic_to_count,
         timestamp: block.header.time,
         transaction_id_to_rune: &mut transaction_id_to_rune,
+        rune_to_transaction_id: &mut rune_to_transaction_id,
+        rune_to_outpoint: &mut rune_to_outpoint,
         updates: HashMap::new(),
       };
 
