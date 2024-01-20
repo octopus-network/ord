@@ -13,6 +13,20 @@ impl PageContent for RunesHtml {
   }
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct TransactionIdsJson {
+  pub ids: Vec<Txid>,
+  pub page_index: usize,
+  pub more: bool,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutPointsJson {
+  pub outpoints: Vec<OutPoint>,
+  pub page_index: usize,
+  pub more: bool,
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

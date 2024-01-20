@@ -13,6 +13,7 @@ use {
   crate::{
     server_config::ServerConfig,
     templates::{
+      runes::{OutPointsJson, TransactionIdsJson},
       BlockHtml, BlockJson, BlocksHtml, BlocksJson, ChildrenHtml, ChildrenJson, ClockSvg,
       CollectionsHtml, HomeHtml, InputHtml, InscriptionHtml, InscriptionJson,
       InscriptionsBlockHtml, InscriptionsHtml, InscriptionsJson, OutputHtml, OutputJson,
@@ -277,10 +278,15 @@ impl Server {
         .route("/static/*path", get(Self::static_asset))
         .route("/status", get(Self::status))
         .route("/tx/:txid", get(Self::transaction))
-        .route("/api/transaction/:txid", get(Self::api_transaction))
-        .route("/api/status", get(Self::api_status))
         .route("/api/runes", get(Self::api_runes))
         .route("/api/rune/:rune", get(Self::api_rune))
+        .route(
+          "/api/transactions/:rune/:page",
+          get(Self::api_transactions_paginated),
+        )
+        .route("/api/holders/:rune/:page", get(Self::api_holders_paginated))
+        .route("/api/transaction/:txid", get(Self::api_transaction))
+        .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
         .route("/api/search/*query", get(Self::search_by_path))
         .layer(Extension(index))
@@ -833,7 +839,6 @@ impl Server {
         .ok_or_not_found(|| format!("transaction {txid}"))?;
 
       let runestone = Runestone::from_transaction(&transaction);
-      log::info!("ys-debug: transation: {:?}", runestone);
 
       let inscription_count = index.inscription_count(txid)?;
 
@@ -1650,13 +1655,60 @@ impl Server {
     })
   }
 
+  async fn api_transactions_paginated(
+    Extension(index): Extension<Arc<Index>>,
+    Path((DeserializeFromStr(spaced_rune), page_index)): Path<(
+      DeserializeFromStr<SpacedRune>,
+      usize,
+    )>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| {
+      let (ids, more) = index.get_transactions_paginated(spaced_rune.rune, 5, page_index)?;
+
+      let prev = page_index.checked_sub(1);
+
+      let next = more.then_some(page_index + 1);
+      Ok(
+        Json(TransactionIdsJson {
+          ids,
+          page_index,
+          more,
+        })
+        .into_response(),
+      )
+    })
+  }
+
+  async fn api_holders_paginated(
+    Extension(index): Extension<Arc<Index>>,
+    Path((DeserializeFromStr(spaced_rune), page_index)): Path<(
+      DeserializeFromStr<SpacedRune>,
+      usize,
+    )>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| {
+      let (outpoints, more) = index.get_outpoints_paginated(spaced_rune.rune, 5, page_index)?;
+
+      let prev = page_index.checked_sub(1);
+
+      let next = more.then_some(page_index + 1);
+      Ok(
+        Json(OutPointsJson {
+          outpoints,
+          page_index,
+          more,
+        })
+        .into_response(),
+      )
+    })
+  }
+
   async fn api_transaction(
     Extension(index): Extension<Arc<Index>>,
     Path(txid): Path<Txid>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
       let transaction = index.get_raw_transaction_info(txid)?;
-      let a = index.get_etching(txid);
       let mut result = RawTransactionResult {
         in_active_chain: transaction.in_active_chain,
         hex: transaction.hex.clone(),
@@ -1675,16 +1727,32 @@ impl Server {
       };
 
       for vin in transaction.vin.iter() {
-        let outpoint = OutPoint::new(
-          vin.txid.ok_or(anyhow::anyhow!("Vin tix id is empty"))?,
-          vin.vout.ok_or(anyhow::anyhow!("Vin vout is empty"))?,
-        );
+        let vin_txid = vin.txid.ok_or(anyhow::anyhow!(format!(
+          "vin.txid {:?} not found",
+          vin.txid
+        )))?;
+        let vin_vout = vin.vout.ok_or(anyhow::anyhow!(format!(
+          "vin.vout {:?} not found",
+          vin.vout
+        )))?;
+
+        let value = index
+          .get_transaction(vin_txid)?
+          .ok_or_not_found(|| format!("txid {vin_txid} not found"))?
+          .output
+          .into_iter()
+          .nth(vin_vout as usize)
+          .ok_or_not_found(|| format!("vout {vin_vout} not found"))?
+          .value;
+
+        let outpoint = OutPoint::new(vin_txid, vin_vout);
         let runes = index.get_rune_balances_for_outpoint(outpoint)?;
         result.vin.push(RawTransactionResultVin {
           sequence: vin.sequence,
           coinbase: vin.coinbase.clone(),
           txid: vin.txid,
           vout: vin.vout,
+          value: Amount::from_sat(value),
           script_sig: vin.script_sig.clone(),
           txinwitness: vin.txinwitness.clone(),
           rune_balances: runes,
