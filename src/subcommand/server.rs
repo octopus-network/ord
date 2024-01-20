@@ -833,6 +833,7 @@ impl Server {
         .ok_or_not_found(|| format!("transaction {txid}"))?;
 
       let runestone = Runestone::from_transaction(&transaction);
+      log::info!("ys-debug: transation: {:?}", runestone);
 
       let inscription_count = index.inscription_count(txid)?;
 
