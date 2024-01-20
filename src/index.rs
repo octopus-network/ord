@@ -1160,8 +1160,8 @@ impl Index {
     let rtx = self.database.begin_read()?;
 
     let transaction_id_to_rune = rtx.open_table(TRANSACTION_ID_TO_RUNE)?;
-    // println!("ys-debug: len: {:?}", transaction_id_to_rune.len());
-    // println!("ys-debug: next: {:#?}", transaction_id_to_rune);
+    log::info!("ys-debug: len: {:?}", transaction_id_to_rune.len());
+    log::info!("ys-debug: next: {:#?}", transaction_id_to_rune);
     let Some(rune) = transaction_id_to_rune.get(&txid.store())? else {
       return Ok(None);
     };
@@ -1171,10 +1171,10 @@ impl Index {
 
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let entry = rune_id_to_rune_entry.get(&id.value())?.unwrap();
-    println!("ys-debug: entry: {:?}", entry.value());
+    log::info!("ys-debug: entry: {:?}", entry.value());
 
     let rune = RuneEntry::load(entry.value());
-    println!("ys-debug: rune: {:?}", rune);
+    log::info!("ys-debug: rune: {:?}", rune);
 
     Ok(Some(RuneEntry::load(entry.value()).spaced_rune()))
   }
