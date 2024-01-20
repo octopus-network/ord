@@ -286,7 +286,12 @@ impl Server {
         .route("/static/*path", get(Self::static_asset))
         .route("/status", get(Self::status))
         .route("/tx/:txid", get(Self::transaction))
-        .route("/api/transation/:txid", get(Self::api_transaction))
+        .route("/api/transaction/:txid", get(Self::api_transaction))
+        .route("/api/status", get(Self::api_status))
+        .route("/api/runes", get(Self::api_runes))
+        .route("/api/rune/:rune", get(Self::api_rune))
+        .route("/api/search", get(Self::search_by_query))
+        .route("/api/search/*query", get(Self::search_by_path))
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
         .layer(Extension(config))
@@ -671,6 +676,26 @@ impl Server {
     })
   }
 
+  async fn api_rune(
+    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(index): Extension<Arc<Index>>,
+    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| {
+      if !index.has_rune_index() {
+        return Err(ServerError::NotFound(
+          "this server has no rune index".to_string(),
+        ));
+      }
+
+      let (id, entry, parent) = index
+        .rune(spaced_rune.rune)?
+        .ok_or_not_found(|| format!("rune {spaced_rune}"))?;
+
+      Ok(Json(RuneJson { entry, id, parent }).into_response())
+    })
+  }
+
   async fn runes(
     Extension(server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
@@ -706,6 +731,20 @@ impl Server {
           .page(server_config)
           .into_response()
       })
+    })
+  }
+
+  async fn api_runes(
+    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(index): Extension<Arc<Index>>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| {
+      Ok(
+        Json(RunesJson {
+          entries: index.runes()?,
+        })
+        .into_response(),
+      )
     })
   }
 
@@ -817,7 +856,7 @@ impl Server {
         .ok_or_not_found(|| format!("transaction {txid}"))?;
 
       let runestone = Runestone::from_transaction(&transaction);
-      println!("ys-debug: transation: {:?}", runestone);
+      log::info!("ys-debug: transation: {:?}", runestone);
 
       let inscription_count = index.inscription_count(txid)?;
 
@@ -871,6 +910,13 @@ impl Server {
         index.status()?.page(server_config).into_response()
       })
     })
+  }
+
+  async fn api_status(
+    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(index): Extension<Arc<Index>>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| Ok(Json(index.status()?).into_response()))
   }
 
   async fn search_by_query(
@@ -1634,7 +1680,6 @@ impl Server {
     task::block_in_place(|| {
       let transaction = index.get_raw_transaction_info(txid)?;
       let a = index.get_etching(txid);
-      println!("ys-debug: {:?}", a);
       let mut result = RawTransactionResult {
         in_active_chain: transaction.in_active_chain,
         hex: transaction.hex.clone(),
@@ -1653,9 +1698,11 @@ impl Server {
       };
 
       for vin in transaction.vin.iter() {
-        let outpoint = OutPoint::new(vin.txid.unwrap(), vin.vout.unwrap());
+        let outpoint = OutPoint::new(
+          vin.txid.ok_or(anyhow::anyhow!("Vin tix id is empty"))?,
+          vin.vout.ok_or(anyhow::anyhow!("Vin vout is empty"))?,
+        );
         let runes = index.get_rune_balances_for_outpoint(outpoint)?;
-        // let spent = index.is_output_spent(outpoint)?;
         result.vin.push(RawTransactionResultVin {
           sequence: vin.sequence,
           coinbase: vin.coinbase.clone(),
@@ -1669,7 +1716,6 @@ impl Server {
       for vout in transaction.vout.iter() {
         let outpoint = OutPoint::new(txid, vout.n);
         let runes = index.get_rune_balances_for_outpoint(outpoint)?;
-        // let spent = index.is_output_spent(outpoint)?;
 
         let mut rtrv = RawTransactionResultVout {
           value: vout.value,
@@ -1679,8 +1725,15 @@ impl Server {
           runestone: None,
         };
 
-        if vout.script_pub_key.script().unwrap().is_op_return() {
-          let runestone = Runestone::from_transaction(&transaction.transaction().unwrap());
+        if vout
+          .script_pub_key
+          .script()
+          .map_err(|e| anyhow::anyhow!(e))?
+          .is_op_return()
+        {
+          let runestone = Runestone::from_transaction(
+            &transaction.transaction().map_err(|e| anyhow::anyhow!(e))?,
+          );
           rtrv.runestone = runestone;
         }
         result.vout.push(rtrv);
