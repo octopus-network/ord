@@ -62,8 +62,8 @@ macro_rules! define_multimap_table {
 define_multimap_table! { SATPOINT_TO_SEQUENCE_NUMBER, &SatPointValue, u32 }
 define_multimap_table! { SAT_TO_SEQUENCE_NUMBER, u64, u32 }
 define_multimap_table! { SEQUENCE_NUMBER_TO_CHILDREN, u32, u32 }
-define_multimap_table! { RUNE_TO_TRANSACTION_ID, u128, &TxidValue }
-define_multimap_table! { RUNE_TO_OUTPOINT, u128, &OutPointValue }
+define_multimap_table! { RUNE_ID_TO_TRANSACTION_ID, RuneIdValue, &TxidValue }
+define_multimap_table! { RUNE_ID_TO_OUTPOINT, RuneIdValue, &OutPointValue }
 define_table! { HEIGHT_TO_BLOCK_HEADER, u32, &HeaderValue }
 define_table! { HEIGHT_TO_LAST_SEQUENCE_NUMBER, u32, u32 }
 define_table! { HOME_INSCRIPTIONS, u32, InscriptionIdValue }
@@ -319,8 +319,8 @@ impl Index {
         tx.open_multimap_table(SATPOINT_TO_SEQUENCE_NUMBER)?;
         tx.open_multimap_table(SAT_TO_SEQUENCE_NUMBER)?;
         tx.open_multimap_table(SEQUENCE_NUMBER_TO_CHILDREN)?;
-        tx.open_multimap_table(RUNE_TO_TRANSACTION_ID)?;
-        tx.open_multimap_table(RUNE_TO_OUTPOINT)?;
+        tx.open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?;
+        tx.open_multimap_table(RUNE_ID_TO_OUTPOINT)?;
         tx.open_table(HEIGHT_TO_BLOCK_HEADER)?;
         tx.open_table(HEIGHT_TO_LAST_SEQUENCE_NUMBER)?;
         tx.open_table(HOME_INSCRIPTIONS)?;
@@ -1117,8 +1117,6 @@ impl Index {
     let rtx = self.database.begin_read()?;
 
     let transaction_id_to_rune = rtx.open_table(TRANSACTION_ID_TO_RUNE)?;
-    log::info!("ys-debug: len: {:?}", transaction_id_to_rune.len());
-    log::info!("ys-debug: next: {:#?}", transaction_id_to_rune);
     let Some(rune) = transaction_id_to_rune.get(&txid.store())? else {
       return Ok(None);
     };
@@ -1128,10 +1126,8 @@ impl Index {
 
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let entry = rune_id_to_rune_entry.get(&id.value())?.unwrap();
-    log::info!("ys-debug: entry: {:?}", entry.value());
 
     let rune = RuneEntry::load(entry.value());
-    log::info!("ys-debug: rune: {:?}", rune);
 
     Ok(Some(RuneEntry::load(entry.value()).spaced_rune()))
   }
@@ -1992,9 +1988,11 @@ impl Index {
   ) -> Result<(Vec<Txid>, bool)> {
     let rtx = self.database.begin_read()?;
 
+    let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
+    let id = rune_to_rune_id.get(rune.0)?.unwrap();
     let mut ids = rtx
-      .open_multimap_table(RUNE_TO_TRANSACTION_ID)?
-      .get(rune.0)?
+      .open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?
+      .get(id.value())?
       .skip(page_index.saturating_mul(page_size).try_into().unwrap())
       .take(page_size.saturating_add(1).try_into().unwrap())
       .map(|result| {
@@ -2021,9 +2019,11 @@ impl Index {
   ) -> Result<(Vec<OutPoint>, bool)> {
     let rtx = self.database.begin_read()?;
 
+    let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
+    let id = rune_to_rune_id.get(rune.0)?.unwrap();
     let mut outpoints = rtx
-      .open_multimap_table(RUNE_TO_OUTPOINT)?
-      .get(rune.0)?
+      .open_multimap_table(RUNE_ID_TO_OUTPOINT)?
+      .get(id.value())?
       .skip(page_index.saturating_mul(page_size).try_into().unwrap())
       .take(page_size.saturating_add(1).try_into().unwrap())
       .map(|result| {
