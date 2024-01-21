@@ -13,7 +13,7 @@ use {
   crate::{
     server_config::ServerConfig,
     templates::{
-      runes::{OutPointsJson, TransactionsPaginatedJson},
+      runes::{HolderAddressWithAmountJson, TransactionsPaginatedJson},
       BlockHtml, BlockJson, BlocksHtml, BlocksJson, ChildrenHtml, ChildrenJson, ClockSvg,
       CollectionsHtml, HomeHtml, InputHtml, InscriptionHtml, InscriptionJson,
       InscriptionsBlockHtml, InscriptionsHtml, InscriptionsJson, OutputHtml, OutputJson,
@@ -1702,9 +1702,24 @@ impl Server {
       let prev = page_index.checked_sub(1);
 
       let next = more.then_some(page_index + 1);
+
+      let holder_address_with_amount = outpoints
+        .clone()
+        .into_iter()
+        .map(|value| {
+          let index = index.clone();
+          let result = inner_api_transaction(index, value.txid).map(|v| {
+            let address = &v.vout[value.vout as usize].script_pub_key.address;
+            let amount = v.vout[value.vout as usize].value.to_sat();
+            (address.clone(), amount)
+          });
+          result
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
       Ok(
-        Json(OutPointsJson {
-          outpoints,
+        Json(HolderAddressWithAmountJson {
+          holder_with_amount: holder_address_with_amount,
           page_index,
           more,
         })

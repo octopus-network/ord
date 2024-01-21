@@ -35,6 +35,13 @@ pub struct OutPointsJson {
   pub more: bool,
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct HolderAddressWithAmountJson {
+  pub holder_with_amount: Vec<(Option<Address<NetworkUnchecked>>, u64)>,
+  pub page_index: usize,
+  pub more: bool,
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
