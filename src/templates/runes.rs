@@ -1,4 +1,5 @@
 use super::*;
+use crate::templates::transaction::RawTransactionResult;
 
 pub type RunesJson = RunesHtml;
 
@@ -16,6 +17,13 @@ impl PageContent for RunesHtml {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct TransactionIdsJson {
   pub ids: Vec<Txid>,
+  pub page_index: usize,
+  pub more: bool,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct TransactionsPaginatedJson {
+  pub txs: Vec<RawTransactionResult>,
   pub page_index: usize,
   pub more: bool,
 }
