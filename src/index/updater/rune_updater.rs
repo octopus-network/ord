@@ -38,8 +38,10 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx> {
   pub(super) statistic_to_count: &'a mut Table<'db, 'tx, u64, u64>,
   pub(super) timestamp: u32,
   pub(super) transaction_id_to_rune: &'a mut Table<'db, 'tx, &'static TxidValue, u128>,
-  pub(super) rune_to_transaction_id: &'a mut MultimapTable<'db, 'tx, u128, &'static TxidValue>,
-  pub(super) rune_to_outpoint: &'a mut MultimapTable<'db, 'tx, u128, &'static OutPointValue>,
+  pub(super) rune_id_to_transaction_id:
+    &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static TxidValue>,
+  pub(super) rune_id_to_outpoint:
+    &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static OutPointValue>,
   pub(super) updates: HashMap<RuneId, RuneUpdate>,
 }
 
@@ -263,7 +265,9 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
             allocate(balance, amount, output);
           }
 
-          self.rune_to_transaction_id.insert(id, &txid.store())?;
+          self
+            .rune_id_to_transaction_id
+            .insert(RuneId::try_from(id).unwrap().store(), &txid.store())?;
         }
 
         // increment entries with minted runes
@@ -400,8 +404,8 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
       for (id, balance) in balances {
         varint::encode_to_vec(id, &mut buffer);
         varint::encode_to_vec(balance, &mut buffer);
-        self.rune_to_outpoint.insert(
-          id,
+        self.rune_id_to_outpoint.insert(
+          RuneId::try_from(id).unwrap().store(),
           &OutPoint {
             txid,
             vout: vout.try_into().unwrap(),
