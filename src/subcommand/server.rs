@@ -680,7 +680,7 @@ impl Server {
   }
 
   async fn api_rune(
-    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
     Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
   ) -> ServerResult<Response> {
@@ -721,7 +721,7 @@ impl Server {
   }
 
   async fn api_runes(
-    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
@@ -841,8 +841,6 @@ impl Server {
         .get_transaction(txid)?
         .ok_or_not_found(|| format!("transaction {txid}"))?;
 
-      let runestone = Runestone::from_transaction(&transaction);
-
       let inscription_count = index.inscription_count(txid)?;
 
       Ok(if accept_json {
@@ -898,7 +896,7 @@ impl Server {
   }
 
   async fn api_status(
-    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| Ok(Json(index.status()?).into_response()))
@@ -1674,10 +1672,6 @@ impl Server {
       let (ids, more) =
         index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
 
-      let prev = page_index.checked_sub(1);
-
-      let next = more.then_some(page_index + 1);
-
       let txs = ids
         .clone()
         .into_iter()
@@ -1713,10 +1707,6 @@ impl Server {
 
       let (outpoints, more) =
         index.get_outpoints_paginated(spaced_rune.rune, page_size, page_index)?;
-
-      let prev = page_index.checked_sub(1);
-
-      let next = more.then_some(page_index + 1);
 
       let holder_address_with_amount = outpoints
         .clone()

@@ -1217,8 +1217,6 @@ impl Index {
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let entry = rune_id_to_rune_entry.get(&id.value())?.unwrap();
 
-    let rune = RuneEntry::load(entry.value());
-
     Ok(Some(RuneEntry::load(entry.value()).spaced_rune()))
   }
 

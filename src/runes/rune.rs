@@ -35,7 +35,7 @@ impl Rune {
     166461473448801533683942072758341510102,
   ];
 
-  pub(crate) fn minimum_at_height(chain: Chain, height: Height) -> Self {
+  pub(crate) fn minimum_at_height(_chain: Chain, height: Height) -> Self {
     let length = 13u32
       .saturating_sub(height.0 / (DIFFCHANGE_INTERVAL * 2))
       .max(1);
