@@ -2,6 +2,7 @@ use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
 
+use pagination::Pagination;
 use {
   self::{
     accept_encoding::AcceptEncoding,
@@ -52,6 +53,7 @@ use {
 mod accept_encoding;
 mod accept_json;
 mod error;
+mod pagination;
 
 #[derive(Copy, Clone)]
 pub(crate) enum InscriptionQuery {
@@ -1657,13 +1659,19 @@ impl Server {
 
   async fn api_transactions_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path((DeserializeFromStr(spaced_rune), page_index)): Path<(
+    Query((DeserializeFromStr(spaced_rune), pagination)): Query<(
       DeserializeFromStr<SpacedRune>,
-      usize,
+      Pagination,
     )>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
-      let (ids, more) = index.get_transactions_paginated(spaced_rune.rune, 5, page_index)?;
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
+      let (ids, more) =
+        index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
 
       let prev = page_index.checked_sub(1);
 
@@ -1691,13 +1699,19 @@ impl Server {
 
   async fn api_holders_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path((DeserializeFromStr(spaced_rune), page_index)): Path<(
+    Query((DeserializeFromStr(spaced_rune), pagination)): Query<(
       DeserializeFromStr<SpacedRune>,
-      usize,
+      Pagination,
     )>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
-      let (outpoints, more) = index.get_outpoints_paginated(spaced_rune.rune, 5, page_index)?;
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
+      let (outpoints, more) =
+        index.get_outpoints_paginated(spaced_rune.rune, page_size, page_index)?;
 
       let prev = page_index.checked_sub(1);
 
@@ -1713,7 +1727,7 @@ impl Server {
             let amount = v.vout[value.vout as usize].value.to_sat();
             HolderAddressWithAmount {
               address: address.clone(),
-              amount,
+              amount: amount.to_string(),
             }
           });
           result
