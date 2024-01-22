@@ -866,20 +866,26 @@ impl Index {
     Ok(entries)
   }
 
-  pub(crate) fn octopus_runes(&self) -> Result<Vec<OctopusRuneEntry>> {
-    let mut entries = Vec::new();
+  pub(crate) fn octopus_runes(
+    &self,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<OctopusRuneEntry>, bool)> {
+    let rtx = self.database.begin_read()?;
 
-    for result in self
-      .database
-      .begin_read()?
+    let entries = rtx
       .open_table(RUNE_ID_TO_RUNE_ENTRY)?
       .iter()?
-    {
-      let (id, entry) = result?;
-      entries.push((RuneId::load(id.value()), RuneEntry::load(entry.value())));
-    }
+      .skip(page_index.saturating_mul(page_size))
+      .take(page_size.saturating_add(1))
+      .map(|result| {
+        result
+          .and_then(|(id, entry)| Ok((RuneId::load(id.value()), RuneEntry::load(entry.value()))))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<_>>>()?;
 
-    let octopus_rune_entry = entries
+    let mut octopus_rune_entry = entries
       .into_iter()
       .map(|(id, entry)| {
         let rune_with_rune_id = RuneWithRuneId {
@@ -905,7 +911,13 @@ impl Index {
       })
       .collect::<Vec<_>>();
 
-    Ok(octopus_rune_entry)
+    let more = octopus_rune_entry.len() > page_size;
+
+    if more {
+      octopus_rune_entry.pop();
+    }
+
+    Ok((octopus_rune_entry, more))
   }
 
   pub(crate) fn get_rune_balance(&self, outpoint: OutPoint, id: RuneId) -> Result<u128> {

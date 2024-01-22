@@ -723,11 +723,17 @@ impl Server {
   async fn api_runes(
     Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
+    Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
       Ok(
         Json(OctupusRunesJson {
-          entries: index.octopus_runes()?,
+          entries: index.octopus_runes(page_size, page_index)?,
         })
         .into_response(),
       )

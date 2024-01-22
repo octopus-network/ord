@@ -17,7 +17,7 @@ impl PageContent for RunesHtml {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct OctupusRunesJson {
-  pub entries: Vec<OctopusRuneEntry>,
+  pub entries: (Vec<OctopusRuneEntry>, bool),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
