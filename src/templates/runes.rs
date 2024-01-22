@@ -1,4 +1,5 @@
 use super::*;
+use crate::templates::transaction::RawTransactionResult;
 
 pub type RunesJson = RunesHtml;
 
@@ -21,8 +22,22 @@ pub struct TransactionIdsJson {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct TransactionsPaginatedJson {
+  pub txs: Vec<RawTransactionResult>,
+  pub page_index: usize,
+  pub more: bool,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct OutPointsJson {
   pub outpoints: Vec<OutPoint>,
+  pub page_index: usize,
+  pub more: bool,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct HolderAddressWithAmountJson {
+  pub holder_with_amount: Vec<(Option<Address<NetworkUnchecked>>, u64)>,
   pub page_index: usize,
   pub more: bool,
 }
