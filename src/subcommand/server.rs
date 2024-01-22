@@ -13,7 +13,7 @@ use {
   crate::{
     server_config::ServerConfig,
     templates::{
-      runes::{HolderAddressWithAmountJson, TransactionsPaginatedJson},
+      runes::{HolderAddressWithAmount, HolderAddressWithAmountJson, TransactionsPaginatedJson},
       BlockHtml, BlockJson, BlocksHtml, BlocksJson, ChildrenHtml, ChildrenJson, ClockSvg,
       CollectionsHtml, HomeHtml, InputHtml, InscriptionHtml, InscriptionJson,
       InscriptionsBlockHtml, InscriptionsHtml, InscriptionsJson, OutputHtml, OutputJson,
@@ -1711,7 +1711,10 @@ impl Server {
           let result = inner_api_transaction(index, value.txid).map(|v| {
             let address = &v.vout[value.vout as usize].script_pub_key.address;
             let amount = v.vout[value.vout as usize].value.to_sat();
-            (address.clone(), amount)
+            HolderAddressWithAmount {
+              address: address.clone(),
+              amount,
+            }
           });
           result
         })

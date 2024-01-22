@@ -37,9 +37,15 @@ pub struct OutPointsJson {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct HolderAddressWithAmountJson {
-  pub holder_with_amount: Vec<(Option<Address<NetworkUnchecked>>, u64)>,
+  pub holder_with_amount: Vec<HolderAddressWithAmount>,
   pub page_index: usize,
   pub more: bool,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct HolderAddressWithAmount {
+  pub address: Option<Address<NetworkUnchecked>>,
+  pub amount: u64,
 }
 
 #[cfg(test)]
