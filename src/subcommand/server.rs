@@ -2,6 +2,7 @@ use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
 
+use crate::templates::runes::OctupusRunesJson;
 use pagination::Pagination;
 use {
   self::{
@@ -725,8 +726,8 @@ impl Server {
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
       Ok(
-        Json(RunesJson {
-          entries: index.runes()?,
+        Json(OctupusRunesJson {
+          entries: index.octopus_runes()?,
         })
         .into_response(),
       )

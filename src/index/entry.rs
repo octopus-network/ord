@@ -45,6 +45,29 @@ pub struct RuneEntry {
   pub timestamp: u32,
 }
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct OctopusRuneEntry {
+  pub burned: u128,
+  pub deadline: Option<u32>,
+  pub divisibility: u8,
+  pub end: Option<u32>,
+  pub etching: Txid,
+  pub limit: Option<u128>,
+  pub mints: u64,
+  pub number: u64,
+  pub rune_wit_rune_id: RuneWithRuneId,
+  pub spacers: u32,
+  pub supply: u128,
+  pub symbol: Option<char>,
+  pub timestamp: u32,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct RuneWithRuneId {
+  pub rune: String,
+  pub rune_id: String,
+}
+
 pub(super) type RuneEntryValue = (
   u128,         // burned
   Option<u32>,  // deadline

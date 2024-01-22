@@ -120,6 +120,18 @@ mod tests {
   }
 
   #[test]
+  fn display_hex_rune_id() {
+    let rune_id = RuneId {
+      height: 0x06050403,
+      index: 0x0201,
+    };
+
+    let rune_id_u128 = u128::from(rune_id);
+    let hex_rune_id = format!("{:x}", rune_id_u128);
+    assert_eq!(hex_rune_id, "60504030201");
+  }
+
+  #[test]
   fn serde() {
     let rune_id = RuneId {
       height: 1,

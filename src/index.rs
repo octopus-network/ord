@@ -34,6 +34,7 @@ use {
 };
 
 pub use self::entry::RuneEntry;
+pub use self::entry::{OctopusRuneEntry, RuneWithRuneId};
 
 pub(crate) mod entry;
 mod fetcher;
@@ -863,6 +864,48 @@ impl Index {
     }
 
     Ok(entries)
+  }
+
+  pub(crate) fn octopus_runes(&self) -> Result<Vec<OctopusRuneEntry>> {
+    let mut entries = Vec::new();
+
+    for result in self
+      .database
+      .begin_read()?
+      .open_table(RUNE_ID_TO_RUNE_ENTRY)?
+      .iter()?
+    {
+      let (id, entry) = result?;
+      entries.push((RuneId::load(id.value()), RuneEntry::load(entry.value())));
+    }
+
+    let octopus_rune_entry = entries
+      .into_iter()
+      .map(|(id, entry)| {
+        let rune_with_rune_id = RuneWithRuneId {
+          rune: entry.rune.to_string(),
+          rune_id: format!("{:x}", u128::from(id)),
+        };
+
+        OctopusRuneEntry {
+          burned: entry.burned,
+          deadline: entry.deadline,
+          divisibility: entry.divisibility,
+          end: entry.end,
+          etching: entry.etching,
+          limit: entry.limit,
+          mints: entry.mints,
+          number: entry.number,
+          rune_wit_rune_id: rune_with_rune_id,
+          spacers: entry.spacers,
+          supply: entry.supply,
+          symbol: entry.symbol,
+          timestamp: entry.timestamp,
+        }
+      })
+      .collect::<Vec<_>>();
+
+    Ok(octopus_rune_entry)
   }
 
   pub(crate) fn get_rune_balance(&self, outpoint: OutPoint, id: RuneId) -> Result<u128> {
