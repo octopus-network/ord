@@ -1993,8 +1993,8 @@ impl Index {
     let mut ids = rtx
       .open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?
       .get(id.value())?
-      .skip(page_index.saturating_mul(page_size).try_into().unwrap())
-      .take(page_size.saturating_add(1).try_into().unwrap())
+      .skip(usize::try_from(page_index.saturating_mul(page_size)).map_err(|e| anyhow::anyhow!(e))?)
+      .take(usize::try_from(page_size.saturating_add(1)).map_err(|e| anyhow::anyhow!(e))?)
       .map(|result| {
         result
           .and_then(|id| Ok(Txid::load(*id.value())))
@@ -2024,8 +2024,8 @@ impl Index {
     let mut outpoints = rtx
       .open_multimap_table(RUNE_ID_TO_OUTPOINT)?
       .get(id.value())?
-      .skip(page_index.saturating_mul(page_size).try_into().unwrap())
-      .take(page_size.saturating_add(1).try_into().unwrap())
+      .skip(usize::try_from(page_index.saturating_mul(page_size)).map_err(|e| anyhow::anyhow!(e))?)
+      .take(usize::try_from(page_size.saturating_add(1)).map_err(|e| anyhow::anyhow!(e))?)
       .map(|result| {
         result
           .and_then(|op| Ok(OutPoint::load(*op.value())))
