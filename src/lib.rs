@@ -11,7 +11,6 @@
   clippy::cast_sign_loss
 )]
 // TODO(need remove in the future)
-#![allow(unused_variables)]
 #![allow(dead_code)]
 
 use {

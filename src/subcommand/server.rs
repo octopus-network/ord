@@ -1,7 +1,10 @@
+use crate::runes::RunescanRunestone;
 use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
 
+use crate::templates::runes::OctupusRunesJson;
+use pagination::Pagination;
 use {
   self::{
     accept_encoding::AcceptEncoding,
@@ -13,7 +16,7 @@ use {
   crate::{
     server_config::ServerConfig,
     templates::{
-      runes::{HolderAddressWithAmountJson, TransactionsPaginatedJson},
+      runes::{HolderAddressWithAmount, HolderAddressWithAmountJson, TransactionsPaginatedJson},
       BlockHtml, BlockJson, BlocksHtml, BlocksJson, ChildrenHtml, ChildrenJson, ClockSvg,
       CollectionsHtml, HomeHtml, InputHtml, InscriptionHtml, InscriptionJson,
       InscriptionsBlockHtml, InscriptionsHtml, InscriptionsJson, OutputHtml, OutputJson,
@@ -53,6 +56,7 @@ use {
 mod accept_encoding;
 mod accept_json;
 mod error;
+mod pagination;
 
 #[derive(Copy, Clone)]
 pub(crate) enum InscriptionQuery {
@@ -683,7 +687,7 @@ impl Server {
   }
 
   async fn api_rune(
-    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
     Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
   ) -> ServerResult<Response> {
@@ -741,16 +745,19 @@ impl Server {
   }
 
   async fn api_runes(
-    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
+    Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
-      Ok(
-        Json(RunesJson {
-          entries: index.runes()?,
-        })
-        .into_response(),
-      )
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
+      let (entries, more) = index.runescan_runes(page_size, page_index)?;
+
+      Ok(Json(OctupusRunesJson { entries, more }).into_response())
     })
   }
 
@@ -861,8 +868,6 @@ impl Server {
         .get_transaction(txid)?
         .ok_or_not_found(|| format!("transaction {txid}"))?;
 
-      let runestone = Runestone::from_transaction(&transaction);
-
       let inscription_count = index.inscription_count(txid)?;
 
       Ok(if accept_json {
@@ -918,7 +923,7 @@ impl Server {
   }
 
   async fn api_status(
-    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| Ok(Json(index.status()?).into_response()))
@@ -1680,17 +1685,17 @@ impl Server {
 
   async fn api_transactions_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path((DeserializeFromStr(spaced_rune), page_index)): Path<(
-      DeserializeFromStr<SpacedRune>,
-      usize,
-    )>,
+    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
-      let (ids, more) = index.get_transactions_paginated(spaced_rune.rune, 5, page_index)?;
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
 
-      let prev = page_index.checked_sub(1);
-
-      let next = more.then_some(page_index + 1);
+      let (ids, more) =
+        index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
 
       let txs = ids
         .clone()
@@ -1714,17 +1719,17 @@ impl Server {
 
   async fn api_holders_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path((DeserializeFromStr(spaced_rune), page_index)): Path<(
-      DeserializeFromStr<SpacedRune>,
-      usize,
-    )>,
+    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
-      let (outpoints, more) = index.get_outpoints_paginated(spaced_rune.rune, 5, page_index)?;
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
 
-      let prev = page_index.checked_sub(1);
-
-      let next = more.then_some(page_index + 1);
+      let (outpoints, more) =
+        index.get_outpoints_paginated(spaced_rune.rune, page_size, page_index)?;
 
       let holder_address_with_amount = outpoints
         .clone()
@@ -1734,7 +1739,10 @@ impl Server {
           let result = inner_api_transaction(index, value.txid).map(|v| {
             let address = &v.vout[value.vout as usize].script_pub_key.address;
             let amount = v.vout[value.vout as usize].value.to_sat();
-            (address.clone(), amount)
+            HolderAddressWithAmount {
+              address: address.clone(),
+              amount: amount.to_string(),
+            }
           });
           result
         })
@@ -1843,7 +1851,25 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
       .is_op_return()
     {
       let runestone =
-        Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?);
+        Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
+          .map(|v| {
+            let runescan_edicts = v
+              .edicts
+              .iter()
+              .map(|v| {
+                let (_, entry, _) = index.rune(Rune(v.id)).unwrap().unwrap();
+                (v.clone(), entry)
+              })
+              .collect::<Vec<_>>();
+
+            RunescanRunestone {
+              edicts: runescan_edicts,
+              etching: v.etching,
+              default_output: v.default_output,
+              burn: v.burn,
+            }
+          });
+
       rtrv.runestone = runestone;
     }
     result.vout.push(rtrv);

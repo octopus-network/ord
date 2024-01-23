@@ -34,6 +34,7 @@ use {
 };
 
 pub use self::entry::RuneEntry;
+pub use self::entry::RunescanRuneEntry;
 
 pub(crate) mod entry;
 mod fetcher;
@@ -860,6 +861,80 @@ impl Index {
     Ok(entries)
   }
 
+  pub(crate) fn runescan_runes(
+    &self,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<RunescanRuneEntry>, bool)> {
+    let rtx = self.database.begin_read()?;
+
+    let entries = rtx
+      .open_table(RUNE_ID_TO_RUNE_ENTRY)?
+      .iter()?
+      .skip(page_index.saturating_mul(page_size))
+      .take(page_size.saturating_add(1))
+      .map(|result| {
+        result
+          .and_then(|(id, entry)| Ok((RuneId::load(id.value()), RuneEntry::load(entry.value()))))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<_>>>()?;
+
+    let mut runescan_rune_entry = entries
+      .into_iter()
+      .map(|(id, entry)| RunescanRuneEntry {
+        burned: entry.burned,
+        deadline: entry.deadline,
+        divisibility: entry.divisibility,
+        end: entry.end,
+        etching: entry.etching,
+        limit: entry.limit,
+        mints: entry.mints,
+        number: entry.number,
+        rune: entry.rune.to_string(),
+        rune_id: format!("{:x}", u128::from(id)),
+        spacers: entry.spacers,
+        supply: entry.supply,
+        symbol: entry.symbol,
+        timestamp: entry.timestamp,
+      })
+      .collect::<Vec<_>>();
+
+    let more = runescan_rune_entry.len() > page_size;
+
+    if more {
+      runescan_rune_entry.pop();
+    }
+
+    Ok((runescan_rune_entry, more))
+  }
+
+  pub(crate) fn get_rune_balance(&self, outpoint: OutPoint, id: RuneId) -> Result<u128> {
+    let rtx = self.database.begin_read()?;
+
+    let outpoint_to_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
+
+    let Some(balances) = outpoint_to_balances.get(&outpoint.store())? else {
+      return Ok(0);
+    };
+
+    let balances_buffer = balances.value();
+
+    let mut i = 0;
+    while i < balances_buffer.len() {
+      let (balance_id, length) = runes::varint::decode(&balances_buffer[i..]);
+      i += length;
+      let (amount, length) = runes::varint::decode(&balances_buffer[i..]);
+      i += length;
+
+      if RuneId::try_from(balance_id).unwrap() == id {
+        return Ok(amount);
+      }
+    }
+
+    Ok(0)
+  }
+
   pub(crate) fn get_rune_balances_for_outpoint(
     &self,
     outpoint: OutPoint,
@@ -1126,8 +1201,6 @@ impl Index {
 
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let entry = rune_id_to_rune_entry.get(&id.value())?.unwrap();
-
-    let rune = RuneEntry::load(entry.value());
 
     Ok(Some(RuneEntry::load(entry.value()).spaced_rune()))
   }

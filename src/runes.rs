@@ -3,7 +3,12 @@ use {
   super::*,
 };
 
-pub use {edict::Edict, rune::Rune, rune_id::RuneId, runestone::Runestone};
+pub use {
+  edict::Edict,
+  rune::Rune,
+  rune_id::RuneId,
+  runestone::{RunescanRunestone, Runestone},
+};
 
 pub(crate) use {etching::Etching, pile::Pile, spaced_rune::SpacedRune};
 
