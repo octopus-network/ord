@@ -1,4 +1,4 @@
-use crate::runes::OctopusRunestone;
+use crate::runes::RunescanRunestone;
 use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
@@ -734,7 +734,7 @@ impl Server {
 
       Ok(
         Json(OctupusRunesJson {
-          entries: index.octopus_runes(page_size, page_index)?,
+          entries: index.runescan_runes(page_size, page_index)?,
         })
         .into_response(),
       )
@@ -1665,10 +1665,8 @@ impl Server {
 
   async fn api_transactions_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Query((DeserializeFromStr(spaced_rune), pagination)): Query<(
-      DeserializeFromStr<SpacedRune>,
-      Pagination,
-    )>,
+    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
       let Pagination {
@@ -1701,10 +1699,8 @@ impl Server {
 
   async fn api_holders_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Query((DeserializeFromStr(spaced_rune), pagination)): Query<(
-      DeserializeFromStr<SpacedRune>,
-      Pagination,
-    )>,
+    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
       let Pagination {
@@ -1837,7 +1833,7 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
       let runestone =
         Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
           .map(|v| {
-            let octopus_edicts = v
+            let runescan_edicts = v
               .edicts
               .iter()
               .map(|v| {
@@ -1846,8 +1842,8 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
               })
               .collect::<Vec<_>>();
 
-            OctopusRunestone {
-              edicts: octopus_edicts,
+            RunescanRunestone {
+              edicts: runescan_edicts,
               etching: v.etching,
               default_output: v.default_output,
               burn: v.burn,

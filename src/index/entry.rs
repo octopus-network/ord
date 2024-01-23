@@ -46,7 +46,7 @@ pub struct RuneEntry {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Eq)]
-pub struct OctopusRuneEntry {
+pub struct RunescanRuneEntry {
   pub burned: u128,
   pub deadline: Option<u32>,
   pub divisibility: u8,

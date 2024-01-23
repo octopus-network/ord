@@ -1,5 +1,5 @@
 use super::*;
-use crate::index::OctopusRuneEntry;
+use crate::index::RunescanRuneEntry;
 use crate::templates::transaction::RawTransactionResult;
 
 pub type RunesJson = RunesHtml;
@@ -17,7 +17,7 @@ impl PageContent for RunesHtml {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct OctupusRunesJson {
-  pub entries: (Vec<OctopusRuneEntry>, bool),
+  pub entries: (Vec<RunescanRuneEntry>, bool),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

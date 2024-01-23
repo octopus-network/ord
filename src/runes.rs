@@ -7,7 +7,7 @@ pub use {
   edict::Edict,
   rune::Rune,
   rune_id::RuneId,
-  runestone::{OctopusRunestone, Runestone},
+  runestone::{RunescanRunestone, Runestone},
 };
 
 pub(crate) use {etching::Etching, pile::Pile, spaced_rune::SpacedRune};
