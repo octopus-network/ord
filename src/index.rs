@@ -34,6 +34,7 @@ use {
 };
 
 pub use self::entry::RuneEntry;
+pub use self::entry::RunescanRuneEntry;
 
 pub(crate) mod entry;
 mod fetcher;
@@ -865,6 +866,54 @@ impl Index {
     Ok(entries)
   }
 
+  pub(crate) fn runescan_runes(
+    &self,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<RunescanRuneEntry>, bool)> {
+    let rtx = self.database.begin_read()?;
+
+    let entries = rtx
+      .open_table(RUNE_ID_TO_RUNE_ENTRY)?
+      .iter()?
+      .skip(page_index.saturating_mul(page_size))
+      .take(page_size.saturating_add(1))
+      .map(|result| {
+        result
+          .and_then(|(id, entry)| Ok((RuneId::load(id.value()), RuneEntry::load(entry.value()))))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<_>>>()?;
+
+    let mut runescan_rune_entry = entries
+      .into_iter()
+      .map(|(id, entry)| RunescanRuneEntry {
+        burned: entry.burned,
+        deadline: entry.deadline,
+        divisibility: entry.divisibility,
+        end: entry.end,
+        etching: entry.etching,
+        limit: entry.limit,
+        mints: entry.mints,
+        number: entry.number,
+        rune: entry.rune.to_string(),
+        rune_id: format!("{:x}", u128::from(id)),
+        spacers: entry.spacers,
+        supply: entry.supply,
+        symbol: entry.symbol,
+        timestamp: entry.timestamp,
+      })
+      .collect::<Vec<_>>();
+
+    let more = runescan_rune_entry.len() > page_size;
+
+    if more {
+      runescan_rune_entry.pop();
+    }
+
+    Ok((runescan_rune_entry, more))
+  }
+
   pub(crate) fn get_rune_balance(&self, outpoint: OutPoint, id: RuneId) -> Result<u128> {
     let rtx = self.database.begin_read()?;
 
@@ -1173,8 +1222,6 @@ impl Index {
 
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let entry = rune_id_to_rune_entry.get(&id.value())?.unwrap();
-
-    let rune = RuneEntry::load(entry.value());
 
     Ok(Some(RuneEntry::load(entry.value()).spaced_rune()))
   }
