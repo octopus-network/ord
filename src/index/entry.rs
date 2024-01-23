@@ -28,7 +28,7 @@ impl Entry for Header {
   }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize, Eq)]
 pub struct RuneEntry {
   pub burned: u128,
   pub deadline: Option<u32>,
@@ -45,7 +45,7 @@ pub struct RuneEntry {
   pub timestamp: u32,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Eq)]
 pub struct OctopusRuneEntry {
   pub burned: u128,
   pub deadline: Option<u32>,
@@ -62,7 +62,7 @@ pub struct OctopusRuneEntry {
   pub timestamp: u32,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Eq)]
 pub struct RuneWithRuneId {
   pub rune: String,
   pub rune_id: String,

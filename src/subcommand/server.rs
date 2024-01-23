@@ -1,3 +1,4 @@
+use crate::runes::OctopusRunestone;
 use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
@@ -1834,7 +1835,25 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
       .is_op_return()
     {
       let runestone =
-        Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?);
+        Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
+          .map(|v| {
+            let octopus_edicts = v
+              .edicts
+              .iter()
+              .map(|v| {
+                let (_, entry, _) = index.rune(Rune(v.id)).unwrap().unwrap();
+                (v.clone(), entry)
+              })
+              .collect::<Vec<_>>();
+
+            OctopusRunestone {
+              edicts: octopus_edicts,
+              etching: v.etching,
+              default_output: v.default_output,
+              burn: v.burn,
+            }
+          });
+
       rtrv.runestone = runestone;
     }
     result.vout.push(rtrv);

@@ -20,6 +20,14 @@ pub struct Runestone {
   pub burn: bool,
 }
 
+#[derive(Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
+pub struct OctopusRunestone {
+  pub edicts: Vec<(Edict, RuneEntry)>,
+  pub etching: Option<Etching>,
+  pub default_output: Option<u32>,
+  pub burn: bool,
+}
+
 struct Message {
   fields: HashMap<u128, u128>,
   edicts: Vec<Edict>,

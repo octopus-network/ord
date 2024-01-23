@@ -1,5 +1,5 @@
 use super::*;
-use crate::runes::Runestone;
+use crate::runes::OctopusRunestone;
 use bitcoin::hashes::hex::FromHex;
 use bitcoincore_rpc::bitcoincore_rpc_json::{
   serde_hex, GetRawTransactionResultVinScriptSig, GetRawTransactionResultVoutScriptPubKey,
@@ -70,7 +70,7 @@ pub struct RawTransactionResultVout {
   pub n: u32,
   pub script_pub_key: GetRawTransactionResultVoutScriptPubKey,
   pub rune_balances: Vec<(SpacedRune, Pile)>,
-  pub runestone: Option<Runestone>,
+  pub runestone: Option<OctopusRunestone>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
