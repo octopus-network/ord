@@ -55,7 +55,7 @@ pub struct RunescanRuneEntry {
   pub limit: Option<u128>,
   pub mints: u64,
   pub number: u64,
-  pub rune_wit_rune_id: RuneWithRuneId,
+  pub rune_with_rune_id: RuneWithRuneId,
   pub spacers: u32,
   pub supply: u128,
   pub symbol: Option<char>,

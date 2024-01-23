@@ -902,7 +902,7 @@ impl Index {
           limit: entry.limit,
           mints: entry.mints,
           number: entry.number,
-          rune_wit_rune_id: rune_with_rune_id,
+          rune_with_rune_id,
           spacers: entry.spacers,
           supply: entry.supply,
           symbol: entry.symbol,
