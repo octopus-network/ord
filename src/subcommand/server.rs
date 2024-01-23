@@ -1662,7 +1662,7 @@ impl Server {
 
   async fn api_transactions_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Path(DeserializeFromStr(rune_id)): Path<DeserializeFromStr<RuneId>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
@@ -1671,8 +1671,8 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let (ids, more) =
-        index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
+      let rune = index.get_rune_by_rune_id(rune_id)?;
+      let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
 
       let txs = ids
         .clone()
@@ -1696,7 +1696,7 @@ impl Server {
 
   async fn api_holders_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Path(DeserializeFromStr(rune_id)): Path<DeserializeFromStr<RuneId>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
@@ -1705,8 +1705,9 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let (outpoints, more) =
-        index.get_outpoints_paginated(spaced_rune.rune, page_size, page_index)?;
+      let rune = index.get_rune_by_rune_id(rune_id)?;
+
+      let (outpoints, more) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
       let holder_address_with_amount = outpoints
         .clone()
