@@ -3,6 +3,7 @@ use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
 
+use crate::templates::rune::RunescanRuneJson;
 use crate::templates::runes::OctupusRunesJson;
 use pagination::Pagination;
 use {
@@ -692,11 +693,11 @@ impl Server {
         ));
       }
 
-      let (id, entry, parent) = index
-        .rune(spaced_rune.rune)?
+      let (entry, parent) = index
+        .api_rune(spaced_rune.rune)?
         .ok_or_not_found(|| format!("rune {spaced_rune}"))?;
 
-      Ok(Json(RuneJson { entry, id, parent }).into_response())
+      Ok(Json(RunescanRuneJson { entry, parent }).into_response())
     })
   }
 

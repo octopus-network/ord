@@ -850,6 +850,60 @@ impl Index {
     Ok(Some((RuneId::load(id), entry, parent)))
   }
 
+  pub(crate) fn api_rune(
+    &self,
+    rune: Rune,
+  ) -> Result<Option<(RunescanRuneEntry, Option<InscriptionId>)>> {
+    let rtx = self.database.begin_read()?;
+
+    let Some(id) = rtx
+      .open_table(RUNE_TO_RUNE_ID)?
+      .get(rune.0)?
+      .map(|guard| guard.value())
+    else {
+      return Ok(None);
+    };
+
+    let entry = RuneEntry::load(
+      rtx
+        .open_table(RUNE_ID_TO_RUNE_ENTRY)?
+        .get(id)?
+        .unwrap()
+        .value(),
+    );
+
+    let parent = InscriptionId {
+      txid: entry.etching,
+      index: 0,
+    };
+
+    let parent = rtx
+      .open_table(INSCRIPTION_ID_TO_SEQUENCE_NUMBER)?
+      .get(&parent.store())?
+      .is_some()
+      .then_some(parent);
+
+    let rune_id = RuneId::load(id);
+    let runescan_entry = RunescanRuneEntry {
+      burned: entry.burned,
+      deadline: entry.deadline,
+      divisibility: entry.divisibility,
+      end: entry.end,
+      etching: entry.etching,
+      limit: entry.limit,
+      mints: entry.mints,
+      number: entry.number,
+      rune: entry.rune.to_string(),
+      rune_id: format!("{:x}", u128::from(rune_id)),
+      spacers: entry.spacers,
+      supply: entry.supply,
+      symbol: entry.symbol,
+      timestamp: entry.timestamp,
+    };
+
+    Ok(Some((runescan_entry, parent)))
+  }
+
   pub(crate) fn runes(&self) -> Result<Vec<(RuneId, RuneEntry)>> {
     let mut entries = Vec::new();
 
