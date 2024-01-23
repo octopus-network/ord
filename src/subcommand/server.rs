@@ -1681,7 +1681,6 @@ impl Server {
 
       let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
       log::info!("rune: {:?}", rune);
-
       let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
 
       let txs = ids
