@@ -6,7 +6,7 @@ use {
 pub use {
   edict::Edict,
   rune::Rune,
-  rune_id::RuneId,
+  rune_id::{HexRuneId, RuneId},
   runestone::{RunescanRunestone, Runestone},
 };
 

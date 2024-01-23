@@ -8,7 +8,7 @@ fn default_size() -> usize {
   100
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Pagination {
   #[serde(default = "default_page")]
   pub page: usize,
