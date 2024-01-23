@@ -1694,7 +1694,6 @@ impl Server {
         .get_rune_by_id(rune_id)?
         .ok_or_not_found(|| "rune ID")?;
       log::info!("rune: {:?}", rune);
-
       let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
 
       let txs = ids
