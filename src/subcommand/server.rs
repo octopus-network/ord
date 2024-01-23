@@ -732,12 +732,9 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      Ok(
-        Json(OctupusRunesJson {
-          entries: index.runescan_runes(page_size, page_index)?,
-        })
-        .into_response(),
-      )
+      let (entries, more) = index.runescan_runes(page_size, page_index)?;
+
+      Ok(Json(OctupusRunesJson { entries, more }).into_response())
     })
   }
 

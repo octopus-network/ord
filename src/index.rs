@@ -34,7 +34,7 @@ use {
 };
 
 pub use self::entry::RuneEntry;
-pub use self::entry::{RuneWithRuneId, RunescanRuneEntry};
+pub use self::entry::RunescanRuneEntry;
 
 pub(crate) mod entry;
 mod fetcher;
@@ -887,27 +887,21 @@ impl Index {
 
     let mut runescan_rune_entry = entries
       .into_iter()
-      .map(|(id, entry)| {
-        let rune_with_rune_id = RuneWithRuneId {
-          rune: entry.rune.to_string(),
-          rune_id: format!("{:x}", u128::from(id)),
-        };
-
-        RunescanRuneEntry {
-          burned: entry.burned,
-          deadline: entry.deadline,
-          divisibility: entry.divisibility,
-          end: entry.end,
-          etching: entry.etching,
-          limit: entry.limit,
-          mints: entry.mints,
-          number: entry.number,
-          rune_with_rune_id,
-          spacers: entry.spacers,
-          supply: entry.supply,
-          symbol: entry.symbol,
-          timestamp: entry.timestamp,
-        }
+      .map(|(id, entry)| RunescanRuneEntry {
+        burned: entry.burned,
+        deadline: entry.deadline,
+        divisibility: entry.divisibility,
+        end: entry.end,
+        etching: entry.etching,
+        limit: entry.limit,
+        mints: entry.mints,
+        number: entry.number,
+        rune: entry.rune.to_string(),
+        rune_id: format!("{:x}", u128::from(id)),
+        spacers: entry.spacers,
+        supply: entry.supply,
+        symbol: entry.symbol,
+        timestamp: entry.timestamp,
       })
       .collect::<Vec<_>>();
 

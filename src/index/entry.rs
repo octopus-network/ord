@@ -55,17 +55,12 @@ pub struct RunescanRuneEntry {
   pub limit: Option<u128>,
   pub mints: u64,
   pub number: u64,
-  pub rune_with_rune_id: RuneWithRuneId,
+  pub rune: String,
+  pub rune_id: String,
   pub spacers: u32,
   pub supply: u128,
   pub symbol: Option<char>,
   pub timestamp: u32,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Eq)]
-pub struct RuneWithRuneId {
-  pub rune: String,
-  pub rune_id: String,
 }
 
 pub(super) type RuneEntryValue = (
