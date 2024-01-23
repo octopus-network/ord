@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 fn default_page() -> usize {
-  1
+  0
 }
 
 fn default_size() -> usize {
