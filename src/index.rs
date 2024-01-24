@@ -2218,7 +2218,7 @@ impl Index {
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let entry = rune_id_to_rune_entry
       .get((rune_id.height, rune_id.index))?
-      .unwrap();
+      .ok_or(anyhow::anyhow!("get entry is None by RuneId({})", rune_id))?;
     let rune = RuneEntry::load(entry.value()).spaced_rune().rune;
 
     Ok(rune)

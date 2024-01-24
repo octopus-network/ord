@@ -1844,27 +1844,27 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
       .map_err(|e| anyhow::anyhow!(e))?
       .is_op_return()
     {
-      let runestone =
+      if let Some(runestone) =
         Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
-          .map(|v| {
-            let runescan_edicts = v
-              .edicts
-              .iter()
-              .map(|v| {
-                let (_, entry, _) = index.rune(Rune(v.id)).unwrap().unwrap();
-                (v.clone(), entry)
-              })
-              .collect::<Vec<_>>();
+      {
+        let mut runescan_edicts = vec![];
+        for edict in runestone.edicts.iter() {
+          let (_, entry, _) = index
+            .rune(Rune(edict.id))
+            .map_err(|e| anyhow::anyhow!(e))?
+            .ok_or(anyhow::anyhow!("rune not found"))?;
+          runescan_edicts.push((edict.clone(), entry));
+        }
 
-            RunescanRunestone {
-              edicts: runescan_edicts,
-              etching: v.etching,
-              default_output: v.default_output,
-              burn: v.burn,
-            }
-          });
-
-      rtrv.runestone = runestone;
+        rtrv.runestone = Some(RunescanRunestone {
+          edicts: runescan_edicts,
+          etching: runestone.etching,
+          default_output: runestone.default_output,
+          burn: runestone.burn,
+        });
+      } else {
+        rtrv.runestone = None;
+      }
     }
     result.vout.push(rtrv);
   }
