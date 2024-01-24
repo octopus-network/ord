@@ -1,11 +1,10 @@
+use crate::runes::HexRuneId;
 use crate::runes::RunescanRunestone;
+use crate::templates::rune::RunescanRuneJson;
+use crate::templates::runes::OctupusRunesJson;
 use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
-
-use crate::runes::HexRuneId;
-use crate::templates::rune::RunescanRuneJson;
-use crate::templates::runes::OctupusRunesJson;
 use pagination::Pagination;
 use {
   self::{
@@ -287,13 +286,10 @@ impl Server {
         .route("/api/runes", get(Self::api_runes))
         .route("/api/rune/:rune", get(Self::api_rune))
         .route(
-          "/api/transactions/:hex_rune_id/:page",
+          "/api/transactions/:rune_id",
           get(Self::api_transactions_paginated),
         )
-        .route(
-          "/api/holders/:hex_rune_id/:page",
-          get(Self::api_holders_paginated),
-        )
+        .route("/api/holders/:rune_id", get(Self::api_holders_paginated))
         .route("/api/transaction/:txid", get(Self::api_transaction))
         .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
@@ -1685,6 +1681,7 @@ impl Server {
 
       let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
       log::info!("rune: {:?}", rune);
+
       let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
 
       let txs = ids
@@ -1724,6 +1721,7 @@ impl Server {
       } = pagination;
 
       let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
+      log::info!("rune: {:?}", rune);
 
       let (outpoints, more) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
