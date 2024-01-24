@@ -1,9 +1,10 @@
+use crate::runes::HexRuneId;
 use crate::runes::RunescanRunestone;
+use crate::templates::rune::RunescanRuneJson;
+use crate::templates::runes::OctupusRunesJson;
 use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
-
-use crate::templates::runes::OctupusRunesJson;
 use pagination::Pagination;
 use {
   self::{
@@ -285,10 +286,10 @@ impl Server {
         .route("/api/runes", get(Self::api_runes))
         .route("/api/rune/:rune", get(Self::api_rune))
         .route(
-          "/api/transactions/:rune/:page",
+          "/api/transactions/:rune_id",
           get(Self::api_transactions_paginated),
         )
-        .route("/api/holders/:rune/:page", get(Self::api_holders_paginated))
+        .route("/api/holders/:rune_id", get(Self::api_holders_paginated))
         .route("/api/transaction/:txid", get(Self::api_transaction))
         .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
@@ -692,11 +693,11 @@ impl Server {
         ));
       }
 
-      let (id, entry, parent) = index
-        .rune(spaced_rune.rune)?
+      let (entry, parent) = index
+        .api_rune(spaced_rune.rune)?
         .ok_or_not_found(|| format!("rune {spaced_rune}"))?;
 
-      Ok(Json(RuneJson { entry, id, parent }).into_response())
+      Ok(Json(RunescanRuneJson { entry, parent }).into_response())
     })
   }
 
@@ -727,6 +728,7 @@ impl Server {
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
+      log::info!("api_runes: {:?}", pagination);
       let Pagination {
         page: page_index,
         size: page_size,
@@ -1662,17 +1664,25 @@ impl Server {
 
   async fn api_transactions_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Path(DeserializeFromStr(rune_id)): Path<DeserializeFromStr<HexRuneId>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
+      log::info!(
+        "api_transactions_paginated, rune_id: {:?}, pagination: {:?}",
+        rune_id,
+        pagination
+      );
+
       let Pagination {
         page: page_index,
         size: page_size,
       } = pagination;
 
-      let (ids, more) =
-        index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
+      let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
+      log::info!("rune: {:?}", rune);
+
+      let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
 
       let txs = ids
         .clone()
@@ -1696,17 +1706,24 @@ impl Server {
 
   async fn api_holders_paginated(
     Extension(index): Extension<Arc<Index>>,
-    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Path(DeserializeFromStr(rune_id)): Path<DeserializeFromStr<HexRuneId>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
+      log::info!(
+        "api_holders_paginated, rune_id: {:?}, pagination: {:?}",
+        rune_id,
+        pagination
+      );
       let Pagination {
         page: page_index,
         size: page_size,
       } = pagination;
 
-      let (outpoints, more) =
-        index.get_outpoints_paginated(spaced_rune.rune, page_size, page_index)?;
+      let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
+      log::info!("rune: {:?}", rune);
+
+      let (outpoints, more) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
       let holder_address_with_amount = outpoints
         .clone()

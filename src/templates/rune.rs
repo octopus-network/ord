@@ -1,4 +1,5 @@
 use super::*;
+use crate::index::RunescanRuneEntry;
 
 pub type RuneJson = RuneHtml;
 
@@ -6,6 +7,12 @@ pub type RuneJson = RuneHtml;
 pub struct RuneHtml {
   pub entry: RuneEntry,
   pub id: RuneId,
+  pub parent: Option<InscriptionId>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct RunescanRuneJson {
+  pub entry: RunescanRuneEntry,
   pub parent: Option<InscriptionId>,
 }
 
