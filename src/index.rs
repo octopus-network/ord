@@ -2211,18 +2211,6 @@ impl Index {
 
     Ok((outpoints, more))
   }
-
-  pub(crate) fn get_rune_by_rune_id(&self, rune_id: RuneId) -> Result<Rune> {
-    let rtx = self.database.begin_read()?;
-
-    let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
-    let entry = rune_id_to_rune_entry
-      .get((rune_id.height, rune_id.index))?
-      .unwrap();
-    let rune = RuneEntry::load(entry.value()).spaced_rune().rune;
-
-    Ok(rune)
-  }
 }
 
 #[cfg(test)]
