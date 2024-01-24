@@ -295,10 +295,14 @@ impl Server {
         .route("/api/runes", get(Self::api_runes))
         .route("/api/rune/:rune", get(Self::api_rune))
         .route(
-          "/api/transactions/:rune_id",
+          "/api/transactions/:hex_rune_id",
           get(Self::api_transactions_paginated),
         )
-        .route("/api/holders/:rune_id", get(Self::api_holders_paginated))
+        .route("/api/txs/:rune_id", get(Self::api_tx_by_rune_id_paginated))
+        .route(
+          "/api/holders/:hex_rune_id",
+          get(Self::api_holders_paginated),
+        )
         .route("/api/transaction/:txid", get(Self::api_transaction))
         .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
@@ -946,11 +950,13 @@ impl Server {
   }
 
   async fn search(index: Arc<Index>, query: String) -> ServerResult<Redirect> {
+    log::info!("searching for {}", query);
     Self::search_inner(index, query).await
   }
 
   async fn search_inner(index: Arc<Index>, query: String) -> ServerResult<Redirect> {
     task::block_in_place(|| {
+      log::info!("searching for {}", query);
       lazy_static! {
         static ref HASH: Regex = Regex::new(r"^[[:xdigit:]]{64}$").unwrap();
         static ref INSCRIPTION_ID: Regex = Regex::new(r"^[[:xdigit:]]{64}i\d+$").unwrap();
@@ -978,7 +984,9 @@ impl Server {
           .parse::<RuneId>()
           .map_err(|err| ServerError::BadRequest(err.to_string()))?;
 
+        log::info!("rune id: {}", id);
         let rune = index.get_rune_by_id(id)?.ok_or_not_found(|| "rune ID")?;
+        log::info!("rune: {:?}", rune);
 
         Ok(Redirect::to(&format!("/rune/{rune}")))
       } else {
@@ -1702,10 +1710,55 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
+      let rune_id = RuneId::from(rune_id);
+      log::info!("rune_id: {}", rune_id);
+
+      let rune = index
+        .get_rune_by_id(rune_id)?
+        .ok_or_not_found(|| "rune ID")?;
       log::info!("rune: {:?}", rune);
 
       let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
+
+      let txs = ids
+        .clone()
+        .into_iter()
+        .map(|id| {
+          let index = index.clone();
+          inner_api_transaction(index, id)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(
+        Json(TransactionsPaginatedJson {
+          txs,
+          page_index,
+          more,
+        })
+        .into_response(),
+      )
+    })
+  }
+
+  async fn api_tx_by_rune_id_paginated(
+    Extension(index): Extension<Arc<Index>>,
+    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Query(pagination): Query<Pagination>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| {
+      log::info!(
+        "api_tx_by_rune_id_paginated, spaced_rune: {:?}, pagination: {:?}",
+        spaced_rune,
+        pagination
+      );
+
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
+      let (ids, more) =
+        index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
 
       let txs = ids
         .clone()
@@ -1743,8 +1796,12 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
-      log::info!("rune: {:?}", rune);
+      let rune_id = RuneId::from(rune_id);
+      log::info!("rune_id: {}", rune_id);
+
+      let rune = index
+        .get_rune_by_id(rune_id)?
+        .ok_or_not_found(|| "rune ID")?;
 
       let (outpoints, more) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
@@ -1867,27 +1924,36 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
       .map_err(|e| anyhow::anyhow!(e))?
       .is_op_return()
     {
-      let runestone =
+      if let Some(runestone) =
         Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
-          .map(|v| {
-            let runescan_edicts = v
-              .edicts
-              .iter()
-              .map(|v| {
-                let (_, entry, _) = index.rune(Rune(v.id)).unwrap().unwrap();
-                (v.clone(), entry)
-              })
-              .collect::<Vec<_>>();
+      {
+        let rune_entry = if let Some(v) = runestone.etching {
+          if let Some(rune) = v.rune {
+            log::info!("rune: {:?}", rune);
+            Some(
+              index
+                .rune(rune)
+                .map_err(|e| anyhow::anyhow!(e))?
+                .ok_or(anyhow::anyhow!("rune not found"))?
+                .1,
+            )
+          } else {
+            None
+          }
+        } else {
+          None
+        };
 
-            RunescanRunestone {
-              edicts: runescan_edicts,
-              etching: v.etching,
-              default_output: v.default_output,
-              burn: v.burn,
-            }
-          });
-
-      rtrv.runestone = runestone;
+        rtrv.runestone = Some(RunescanRunestone {
+          edicts: runestone.edicts,
+          etching: runestone.etching,
+          rune_entry,
+          default_output: runestone.default_output,
+          burn: runestone.burn,
+        });
+      } else {
+        rtrv.runestone = None;
+      }
     }
     result.vout.push(rtrv);
   }
