@@ -1679,7 +1679,10 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
+      let rune = index
+        .get_rune_by_id(RuneId::from(rune_id))?
+        .ok_or(anyhow::anyhow!(format!("rune not found: {:?}", rune_id)))?;
+
       log::info!("rune: {:?}", rune);
 
       let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
@@ -1720,8 +1723,9 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let rune = index.get_rune_by_rune_id(RuneId::from(rune_id))?;
-      log::info!("rune: {:?}", rune);
+      let rune = index
+        .get_rune_by_id(RuneId::from(rune_id))?
+        .ok_or(anyhow::anyhow!(format!("rune not found: {:?}", rune_id)))?;
 
       let (outpoints, more) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
