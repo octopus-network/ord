@@ -924,8 +924,19 @@ impl Index {
     &self,
     page_size: usize,
     page_index: usize,
-  ) -> Result<(Vec<RunescanRuneEntry>, bool)> {
+  ) -> Result<(Vec<RunescanRuneEntry>, usize)> {
     let rtx = self.database.begin_read()?;
+
+    let total = rtx
+      .open_table(RUNE_ID_TO_RUNE_ENTRY)?
+      .iter()?
+      .map(|result| {
+        result
+          .and_then(|(id, entry)| Ok((RuneId::load(id.value()), RuneEntry::load(entry.value()))))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<_>>>()?
+      .len();
 
     let entries = rtx
       .open_table(RUNE_ID_TO_RUNE_ENTRY)?
@@ -939,7 +950,7 @@ impl Index {
       })
       .collect::<Result<Vec<_>>>()?;
 
-    let mut runescan_rune_entry = entries
+    let runescan_rune_entry = entries
       .into_iter()
       .map(|(id, entry)| RunescanRuneEntry {
         burned: entry.burned,
@@ -959,13 +970,7 @@ impl Index {
       })
       .collect::<Vec<_>>();
 
-    let more = runescan_rune_entry.len() > page_size;
-
-    if more {
-      runescan_rune_entry.pop();
-    }
-
-    Ok((runescan_rune_entry, more))
+    Ok((runescan_rune_entry, total))
   }
 
   pub(crate) fn get_rune_balance(&self, outpoint: OutPoint, id: RuneId) -> Result<u128> {
@@ -2155,12 +2160,26 @@ impl Index {
     rune: Rune,
     page_size: usize,
     page_index: usize,
-  ) -> Result<(Vec<Txid>, bool)> {
+  ) -> Result<(Vec<Txid>, usize)> {
     let rtx = self.database.begin_read()?;
 
     let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
-    let id = rune_to_rune_id.get(rune.0)?.unwrap();
-    let mut ids = rtx
+    let id = rune_to_rune_id
+      .get(rune.0)?
+      .ok_or(anyhow::anyhow!("rune not found"))?;
+
+    let total = rtx
+      .open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?
+      .get(id.value())?
+      .map(|result| {
+        result
+          .and_then(|id| Ok(Txid::load(*id.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<Txid>>>()?
+      .len();
+
+    let ids = rtx
       .open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?
       .get(id.value())?
       .skip(usize::try_from(page_index.saturating_mul(page_size)).map_err(|e| anyhow::anyhow!(e))?)
@@ -2172,13 +2191,7 @@ impl Index {
       })
       .collect::<Result<Vec<Txid>>>()?;
 
-    let more = ids.len() > page_size;
-
-    if more {
-      ids.pop();
-    }
-
-    Ok((ids, more))
+    Ok((ids, total))
   }
 
   pub(crate) fn get_outpoints_paginated(
@@ -2186,11 +2199,25 @@ impl Index {
     rune: Rune,
     page_size: usize,
     page_index: usize,
-  ) -> Result<(Vec<OutPoint>, bool)> {
+  ) -> Result<(Vec<OutPoint>, usize)> {
     let rtx = self.database.begin_read()?;
 
     let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
-    let id = rune_to_rune_id.get(rune.0)?.unwrap();
+    let id = rune_to_rune_id
+      .get(rune.0)?
+      .ok_or(anyhow::anyhow!("rune not found"))?;
+
+    let total = rtx
+      .open_multimap_table(RUNE_ID_TO_OUTPOINT)?
+      .get(id.value())?
+      .map(|result| {
+        result
+          .and_then(|op| Ok(OutPoint::load(*op.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<OutPoint>>>()?
+      .len();
+
     let mut outpoints = rtx
       .open_multimap_table(RUNE_ID_TO_OUTPOINT)?
       .get(id.value())?
@@ -2209,7 +2236,7 @@ impl Index {
       outpoints.pop();
     }
 
-    Ok((outpoints, more))
+    Ok((outpoints, total))
   }
 }
 
