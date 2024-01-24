@@ -286,10 +286,14 @@ impl Server {
         .route("/api/runes", get(Self::api_runes))
         .route("/api/rune/:rune", get(Self::api_rune))
         .route(
-          "/api/transactions/:rune_id",
+          "/api/transactions/:hex_rune_id",
           get(Self::api_transactions_paginated),
         )
-        .route("/api/holders/:rune_id", get(Self::api_holders_paginated))
+        .route("/api/txs/:rune_id", get(Self::api_tx_by_rune_id_paginated))
+        .route(
+          "/api/holders/:hex_rune_id",
+          get(Self::api_holders_paginated),
+        )
         .route("/api/transaction/:txid", get(Self::api_transaction))
         .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
@@ -923,6 +927,7 @@ impl Server {
   }
 
   async fn search(index: Arc<Index>, query: String) -> ServerResult<Redirect> {
+    log::info!("searching for {}", query);
     Self::search_inner(index, query).await
   }
 
@@ -1691,6 +1696,46 @@ impl Server {
       log::info!("rune: {:?}", rune);
 
       let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
+
+      let txs = ids
+        .clone()
+        .into_iter()
+        .map(|id| {
+          let index = index.clone();
+          inner_api_transaction(index, id)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(
+        Json(TransactionsPaginatedJson {
+          txs,
+          page_index,
+          more,
+        })
+        .into_response(),
+      )
+    })
+  }
+
+  async fn api_tx_by_rune_id_paginated(
+    Extension(index): Extension<Arc<Index>>,
+    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Query(pagination): Query<Pagination>,
+  ) -> ServerResult<Response> {
+    task::block_in_place(|| {
+      log::info!(
+        "api_transactions_paginated, spaced_rune: {:?}, pagination: {:?}",
+        spaced_rune,
+        pagination
+      );
+
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
+      let (ids, more) =
+        index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
 
       let txs = ids
         .clone()
