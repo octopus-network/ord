@@ -928,6 +928,7 @@ impl Server {
 
   async fn search_inner(index: Arc<Index>, query: String) -> ServerResult<Redirect> {
     task::block_in_place(|| {
+      log::info!("searching for {}", query);
       lazy_static! {
         static ref HASH: Regex = Regex::new(r"^[[:xdigit:]]{64}$").unwrap();
         static ref INSCRIPTION_ID: Regex = Regex::new(r"^[[:xdigit:]]{64}i\d+$").unwrap();
@@ -955,7 +956,9 @@ impl Server {
           .parse::<RuneId>()
           .map_err(|err| ServerError::BadRequest(err.to_string()))?;
 
+        log::info!("rune id: {}", id);
         let rune = index.get_rune_by_id(id)?.ok_or_not_found(|| "rune ID")?;
+        log::info!("rune: {:?}", rune);
 
         Ok(Redirect::to(&format!("/rune/{rune}")))
       } else {
@@ -1679,10 +1682,12 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let rune = index
-        .get_rune_by_id(RuneId::from(rune_id))?
-        .ok_or(anyhow::anyhow!(format!("rune not found: {:?}", rune_id)))?;
+      let rune_id = RuneId::from(rune_id);
+      log::info!("rune_id: {}", rune_id);
 
+      let rune = index
+        .get_rune_by_id(rune_id)?
+        .ok_or_not_found(|| "rune ID")?;
       log::info!("rune: {:?}", rune);
 
       let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
@@ -1723,9 +1728,12 @@ impl Server {
         size: page_size,
       } = pagination;
 
+      let rune_id = RuneId::from(rune_id);
+      log::info!("rune_id: {}", rune_id);
+
       let rune = index
-        .get_rune_by_id(RuneId::from(rune_id))?
-        .ok_or(anyhow::anyhow!(format!("rune not found: {:?}", rune_id)))?;
+        .get_rune_by_id(rune_id)?
+        .ok_or_not_found(|| "rune ID")?;
 
       let (outpoints, more) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
