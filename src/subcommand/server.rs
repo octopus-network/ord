@@ -1724,7 +1724,7 @@ impl Server {
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
       log::info!(
-        "api_transactions_paginated, spaced_rune: {:?}, pagination: {:?}",
+        "api_tx_by_rune_id_paginated, spaced_rune: {:?}, pagination: {:?}",
         spaced_rune,
         pagination
       );
@@ -1904,18 +1904,27 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
       if let Some(runestone) =
         Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
       {
-        let mut runescan_edicts = vec![];
-        for edict in runestone.edicts.iter() {
-          let (_, entry, _) = index
-            .rune(Rune(edict.id))
-            .map_err(|e| anyhow::anyhow!(e))?
-            .ok_or(anyhow::anyhow!("rune not found"))?;
-          runescan_edicts.push((edict.clone(), entry));
-        }
+        let rune_entry = if let Some(v) = runestone.etching {
+          if let Some(rune) = v.rune {
+            log::info!("rune: {:?}", rune);
+            Some(
+              index
+                .rune(rune)
+                .map_err(|e| anyhow::anyhow!(e))?
+                .ok_or(anyhow::anyhow!("rune not found"))?
+                .1,
+            )
+          } else {
+            None
+          }
+        } else {
+          None
+        };
 
         rtrv.runestone = Some(RunescanRunestone {
-          edicts: runescan_edicts,
+          edicts: runestone.edicts,
           etching: runestone.etching,
+          rune_entry,
           default_output: runestone.default_output,
           burn: runestone.burn,
         });
