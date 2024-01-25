@@ -22,7 +22,7 @@ pub struct Runestone {
 
 #[derive(Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct RunescanRunestone {
-  pub edicts: Vec<Edict>,
+  pub edicts: Vec<RunescanEdict>,
   pub etching: Option<Etching>,
   pub rune_entry: Option<RuneEntry>,
   pub default_output: Option<u32>,

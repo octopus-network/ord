@@ -18,21 +18,21 @@ impl PageContent for RunesHtml {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct OctupusRunesJson {
   pub entries: Vec<RunescanRuneEntry>,
-  pub more: bool,
+  pub total: usize,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct TransactionsPaginatedJson {
   pub txs: Vec<RawTransactionResult>,
   pub page_index: usize,
-  pub more: bool,
+  pub total: usize,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct HolderAddressWithAmountJson {
   pub holder_with_amount: Vec<HolderAddressWithAmount>,
   pub page_index: usize,
-  pub more: bool,
+  pub total: usize,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

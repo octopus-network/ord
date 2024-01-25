@@ -25,7 +25,7 @@ pub(crate) use {
   sat::{SatHtml, SatInscriptionJson, SatInscriptionsJson, SatJson},
   server_config::ServerConfig,
   status::StatusHtml,
-  transaction::{TransactionHtml, TransactionJson},
+  transaction::{GetRawTransactionResultVinScriptSig, TransactionHtml, TransactionJson},
 };
 
 pub mod block;
