@@ -458,6 +458,10 @@ impl Index {
     self.index_sats
   }
 
+  pub(crate) fn options(&self) -> &Options {
+    &self.options
+  }
+
   pub(crate) fn status(&self) -> Result<StatusHtml> {
     let rtx = self.database.begin_read()?;
 
