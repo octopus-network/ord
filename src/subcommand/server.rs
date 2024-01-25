@@ -1,10 +1,16 @@
 use crate::runes::HexRuneId;
+use crate::runes::RunescanEdict;
 use crate::runes::RunescanRunestone;
 use crate::templates::rune::RunescanRuneJson;
 use crate::templates::runes::OctupusRunesJson;
 use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
+use crate::templates::GetRawTransactionResultVinScriptSig;
+use bitcoin::address::Address;
+use bitcoin::blockdata::script::Script;
+use bitcoin::hashes::hex::FromHex;
+use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine};
 use pagination::Pagination;
 use {
   self::{
@@ -298,7 +304,6 @@ impl Server {
           "/api/transactions/:hex_rune_id",
           get(Self::api_transactions_paginated),
         )
-        .route("/api/txs/:rune_id", get(Self::api_tx_by_rune_id_paginated))
         .route(
           "/api/holders/:hex_rune_id",
           get(Self::api_holders_paginated),
@@ -694,7 +699,7 @@ impl Server {
   async fn api_rune(
     Extension(_server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
-    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
+    Path(DeserializeFromStr(rune_id)): Path<DeserializeFromStr<HexRuneId>>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
       if !index.has_rune_index() {
@@ -703,9 +708,17 @@ impl Server {
         ));
       }
 
+      let rune_id = RuneId::from(rune_id);
+      log::info!("rune_id: {}", rune_id);
+
+      let rune = index
+        .get_rune_by_id(rune_id)?
+        .ok_or_not_found(|| "rune ID")?;
+      log::info!("rune: {:?}", rune);
+
       let (entry, parent) = index
-        .api_rune(spaced_rune.rune)?
-        .ok_or_not_found(|| format!("rune {spaced_rune}"))?;
+        .api_rune(rune)?
+        .ok_or_not_found(|| format!("rune {rune}"))?;
 
       Ok(Json(RunescanRuneJson { entry, parent }).into_response())
     })
@@ -761,9 +774,9 @@ impl Server {
         size: page_size,
       } = pagination;
 
-      let (entries, more) = index.runescan_runes(page_size, page_index)?;
+      let (entries, total) = index.runescan_runes(page_size, page_index)?;
 
-      Ok(Json(OctupusRunesJson { entries, more }).into_response())
+      Ok(Json(OctupusRunesJson { entries, total }).into_response())
     })
   }
 
@@ -1718,7 +1731,7 @@ impl Server {
         .ok_or_not_found(|| "rune ID")?;
       log::info!("rune: {:?}", rune);
 
-      let (ids, more) = index.get_transactions_paginated(rune, page_size, page_index)?;
+      let (ids, total) = index.get_transactions_paginated(rune, page_size, page_index)?;
 
       let txs = ids
         .clone()
@@ -1733,47 +1746,7 @@ impl Server {
         Json(TransactionsPaginatedJson {
           txs,
           page_index,
-          more,
-        })
-        .into_response(),
-      )
-    })
-  }
-
-  async fn api_tx_by_rune_id_paginated(
-    Extension(index): Extension<Arc<Index>>,
-    Path(DeserializeFromStr(spaced_rune)): Path<DeserializeFromStr<SpacedRune>>,
-    Query(pagination): Query<Pagination>,
-  ) -> ServerResult<Response> {
-    task::block_in_place(|| {
-      log::info!(
-        "api_tx_by_rune_id_paginated, spaced_rune: {:?}, pagination: {:?}",
-        spaced_rune,
-        pagination
-      );
-
-      let Pagination {
-        page: page_index,
-        size: page_size,
-      } = pagination;
-
-      let (ids, more) =
-        index.get_transactions_paginated(spaced_rune.rune, page_size, page_index)?;
-
-      let txs = ids
-        .clone()
-        .into_iter()
-        .map(|id| {
-          let index = index.clone();
-          inner_api_transaction(index, id)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-      Ok(
-        Json(TransactionsPaginatedJson {
-          txs,
-          page_index,
-          more,
+          total,
         })
         .into_response(),
       )
@@ -1803,7 +1776,7 @@ impl Server {
         .get_rune_by_id(rune_id)?
         .ok_or_not_found(|| "rune ID")?;
 
-      let (outpoints, more) = index.get_outpoints_paginated(rune, page_size, page_index)?;
+      let (outpoints, total) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
       let holder_address_with_amount = outpoints
         .clone()
@@ -1826,7 +1799,7 @@ impl Server {
         Json(HolderAddressWithAmountJson {
           holder_with_amount: holder_address_with_amount,
           page_index,
-          more,
+          total,
         })
         .into_response(),
       )
@@ -1895,13 +1868,58 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
 
     let outpoint = OutPoint::new(vin_txid, vin_vout);
     let runes = index.get_rune_balances_for_outpoint(outpoint)?;
+    let raw_script_sig = vin.script_sig.clone().ok_or(anyhow::anyhow!(
+      "vin.script_sig {:?} not found",
+      vin.script_sig
+    ))?;
+    log::info!("raw_script_sig: {:?}", raw_script_sig);
+
+    let address = if raw_script_sig.asm.len() == 0 {
+      "".to_string()
+    } else {
+      let script_hex = &raw_script_sig.asm[4..];
+      log::info!("script_hex: {}", script_hex);
+      let pubkey_hash = <[u8; 20]>::from_hex(script_hex).map_err(|e| anyhow::anyhow!(e))?;
+      let mut engine = sha256::Hash::engine();
+      // 提取见证版本和长度
+      let mut version = [0; 1];
+      hex::decode_to_slice(&raw_script_sig.asm[0..2], &mut version as &mut [u8])
+        .map_err(|e| anyhow::anyhow!(e))?;
+      log::info!("version: {:?}", version);
+      let mut length = [0; 1];
+      hex::decode_to_slice(&raw_script_sig.asm[2..4], &mut length as &mut [u8])
+        .map_err(|e| anyhow::anyhow!(e))?;
+      log::info!("version: {:?}", version);
+
+      engine.input(&[version[0], length[0]]);
+      engine.input(&pubkey_hash);
+      let witness_program_hash =
+        ripemd160::Hash::hash(&sha256::Hash::from_engine(engine).to_byte_array());
+
+      // 手动构建P2SH脚本
+      let mut script_data = vec![0xa9, 0x14]; // OP_HASH160, push 20 bytes
+      script_data.extend_from_slice(&witness_program_hash[..]);
+      script_data.push(0x87); // OP_EQUAL
+
+      let script = Script::from_bytes(&script_data);
+      let network = index.options().chain().network();
+      let address = Address::from_script(&script, network).map_err(|e| anyhow::anyhow!(e))?;
+      address.to_string()
+    };
+
+    let script_sig = GetRawTransactionResultVinScriptSig {
+      asm: raw_script_sig.asm,
+      hex: raw_script_sig.hex,
+      address,
+    };
+
     result.vin.push(RawTransactionResultVin {
       sequence: vin.sequence,
       coinbase: vin.coinbase.clone(),
       txid: vin.txid,
       vout: vin.vout,
       value: Amount::from_sat(value),
-      script_sig: vin.script_sig.clone(),
+      script_sig: Some(script_sig),
       txinwitness: vin.txinwitness.clone(),
       rune_balances: runes,
     });
@@ -1944,8 +1962,30 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
           None
         };
 
+        let rune_edicts = runestone
+          .edicts
+          .into_iter()
+          .map(|edict| {
+            log::info!("edict: {:?}", edict);
+            let id = edict.id & 0xffffffffff;
+            let rune_id = RuneId::try_from(id).map_err(|e| anyhow::anyhow!(e))?;
+            let rune = index
+              .get_rune_by_id(rune_id)
+              .map_err(|e| anyhow::anyhow!(e))?
+              .ok_or(anyhow::anyhow!("rune not found"))?;
+
+            Ok(RunescanEdict {
+              id: edict.id,
+              rune: rune.to_string(),
+              rune_id: format!("{:x}", u128::from(rune_id)),
+              amount: edict.amount,
+              output: edict.output,
+            })
+          })
+          .collect::<Result<Vec<_>, anyhow::Error>>()?;
+
         rtrv.runestone = Some(RunescanRunestone {
-          edicts: runestone.edicts,
+          edicts: rune_edicts,
           etching: runestone.etching,
           rune_entry,
           default_output: runestone.default_output,

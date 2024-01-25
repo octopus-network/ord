@@ -1,9 +1,7 @@
 use super::*;
 use crate::runes::RunescanRunestone;
 use bitcoin::hashes::hex::FromHex;
-use bitcoincore_rpc::bitcoincore_rpc_json::{
-  serde_hex, GetRawTransactionResultVinScriptSig, GetRawTransactionResultVoutScriptPubKey,
-};
+use bitcoincore_rpc::bitcoincore_rpc_json::{serde_hex, GetRawTransactionResultVoutScriptPubKey};
 use serde::de::Error;
 
 pub type TransactionJson = TransactionHtml;
@@ -60,6 +58,15 @@ pub struct RawTransactionResultVin {
   #[serde(default, deserialize_with = "deserialize_hex_array_opt")]
   pub txinwitness: Option<Vec<Vec<u8>>>,
   pub rune_balances: Vec<(SpacedRune, Pile)>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetRawTransactionResultVinScriptSig {
+  pub asm: String,
+  #[serde(with = "serde_hex")]
+  pub hex: Vec<u8>,
+  pub address: String,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
