@@ -1953,7 +1953,7 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
 
             Ok(RunescanEdict {
               id: edict.id,
-              run: rune.to_string(),
+              rune: rune.to_string(),
               rune_id: format!("{:x}", u128::from(rune_id)),
               amount: edict.amount,
               output: edict.output,
