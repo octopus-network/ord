@@ -618,7 +618,7 @@ impl<'index> Updater<'_> {
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
-        rune_updater.index_runes(index, i, tx, *txid)?;
+        rune_updater.index_runes(i, tx, *txid, index.options.chain().network())?;
       }
 
       for (rune_id, update) in rune_updater.updates {

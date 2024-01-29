@@ -14,12 +14,12 @@ pub struct AddressTransactionsJson {
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq, Ord, PartialOrd)]
 pub struct AddressRequest {
-  pub address: Address<NetworkUnchecked>,
+  pub address: String,
 }
 
 impl Display for AddressRequest {
   fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-    write!(f, "{:?}", self.address)
+    write!(f, "{}", self.address)
   }
 }
 
@@ -27,9 +27,9 @@ impl FromStr for AddressRequest {
   type Err = crate::Error;
 
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    let back: Address<NetworkUnchecked> = serde_json::from_str(&s)?;
-
-    Ok(Self { address: back })
+    Ok(Self {
+      address: s.to_string(),
+    })
   }
 }
 

@@ -1804,13 +1804,23 @@ impl Server {
     Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
+    log::info!(
+      "api_address_rune_ids, address: {:?}, pagination: {:?}",
+      address,
+      pagination
+    );
     task::block_in_place(|| {
       let Pagination {
         page: page_index,
         size: page_size,
       } = pagination;
 
-      let ser = serde_json::to_string(&address.address).map_err(|e| {
+      let address: Address<NetworkUnchecked> =
+        Address::from_str(&address.address).map_err(|e| {
+          ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
+        })?;
+
+      let ser = serde_json::to_string(&address).map_err(|e| {
         ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
       })?;
 
@@ -1824,13 +1834,23 @@ impl Server {
     Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
+    log::info!(
+      "api_address_txids, address: {:?}, pagination: {:?}",
+      address,
+      pagination
+    );
     task::block_in_place(|| {
       let Pagination {
         page: page_index,
         size: page_size,
       } = pagination;
 
-      let ser = serde_json::to_string(&address.address).map_err(|e| {
+      let address: Address<NetworkUnchecked> =
+        Address::from_str(&address.address).map_err(|e| {
+          ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
+        })?;
+
+      let ser = serde_json::to_string(&address).map_err(|e| {
         ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
       })?;
 
