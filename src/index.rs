@@ -2363,14 +2363,23 @@ impl Index {
         vin.vout
       )))?;
 
-      let value = self
+      let tx_out = self
         .get_transaction(vin_txid)?
         .ok_or(anyhow::anyhow!("txid {vin_txid} not found"))?
         .output
         .into_iter()
         .nth(vin_vout as usize)
-        .ok_or(anyhow::anyhow!("vout {vin_vout} not found"))?
-        .value;
+        .ok_or(anyhow::anyhow!("vout {vin_vout} not found"))?;
+
+      let address = Address::from_script(&tx_out.script_pubkey, self.options.chain().network())
+        .map_err(|err| {
+          anyhow::anyhow!(
+            "Address::from_script({}, {}) {:?}",
+            tx_out.script_pubkey,
+            self.options.chain().network(),
+            err
+          )
+        })?;
 
       let outpoint = OutPoint::new(vin_txid, vin_vout);
       let runes = self.get_rune_balances_for_outpoint(outpoint)?;
@@ -2378,45 +2387,11 @@ impl Index {
         "vin.script_sig {:?} not found",
         vin.script_sig
       ))?;
-      // log::info!("raw_script_sig: {:?}", raw_script_sig);
-
-      // let address = if raw_script_sig.asm.len() == 0 {
-      //   "".to_string()
-      // } else {
-      //   let script_hex = &raw_script_sig.asm[4..];
-      //   log::info!("script_hex: {}", script_hex);
-      //   let pubkey_hash = <[u8; 20]>::from_hex(script_hex).map_err(|e| anyhow::anyhow!(e))?;
-      //   let mut engine = sha256::Hash::engine();
-      //   // 提取见证版本和长度
-      //   let mut version = [0; 1];
-      //   hex::decode_to_slice(&raw_script_sig.asm[0..2], &mut version as &mut [u8])
-      //     .map_err(|e| anyhow::anyhow!(e))?;
-      //   log::info!("version: {:?}", version);
-      //   let mut length = [0; 1];
-      //   hex::decode_to_slice(&raw_script_sig.asm[2..4], &mut length as &mut [u8])
-      //     .map_err(|e| anyhow::anyhow!(e))?;
-      //   log::info!("version: {:?}", version);
-
-      //   engine.input(&[version[0], length[0]]);
-      //   engine.input(&pubkey_hash);
-      //   let witness_program_hash =
-      //     ripemd160::Hash::hash(&sha256::Hash::from_engine(engine).to_byte_array());
-
-      //   // 手动构建P2SH脚本
-      //   let mut script_data = vec![0xa9, 0x14]; // OP_HASH160, push 20 bytes
-      //   script_data.extend_from_slice(&witness_program_hash[..]);
-      //   script_data.push(0x87); // OP_EQUAL
-
-      //   let script = Script::from_bytes(&script_data);
-      //   let network = index.options().chain().network();
-      //   let address = Address::from_script(&script, network).map_err(|e| anyhow::anyhow!(e))?;
-      //   address.to_string()
-      // };
 
       let script_sig = GetRawTransactionResultVinScriptSig {
         asm: raw_script_sig.asm,
         hex: raw_script_sig.hex,
-        address: String::new(),
+        address: address.to_string(),
       };
 
       result.vin.push(RawTransactionResultVin {
@@ -2424,7 +2399,7 @@ impl Index {
         coinbase: vin.coinbase.clone(),
         txid: vin.txid,
         vout: vin.vout,
-        value: Amount::from_sat(value),
+        value: Amount::from_sat(tx_out.value),
         script_sig: Some(script_sig),
         txinwitness: vin.txinwitness.clone(),
         rune_balances: runes,

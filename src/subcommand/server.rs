@@ -3,10 +3,6 @@ use crate::templates::rune::RunescanRuneJson;
 use crate::templates::runes::OctupusRunesJson;
 use crate::templates::{AddressHolderRuneIdJson, AddressTransactionsJson};
 
-// use bitcoin::address::Address;
-// use bitcoin::blockdata::script::Script;
-// use bitcoin::hashes::hex::FromHex;
-// use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine};
 use self::templates::address::AddressRequest;
 use pagination::Pagination;
 
