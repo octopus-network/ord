@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressHolderRuneIdJson {
-  pub rune_ids: Vec<RuneId>,
+  pub rune_ids: Vec<String>,
   pub total: usize,
 }
 

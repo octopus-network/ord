@@ -1821,7 +1821,18 @@ impl Server {
       })?;
 
       let (rune_ids, total) = index.get_address_rune_ids(ser.to_string(), page_size, page_index)?;
-      Ok(Json(AddressHolderRuneIdJson { rune_ids, total }).into_response())
+      let hex_rune_ids = rune_ids
+        .into_iter()
+        .map(|rune_id| format!("{:x}", u128::from(rune_id)))
+        .collect::<Vec<_>>();
+
+      Ok(
+        Json(AddressHolderRuneIdJson {
+          rune_ids: hex_rune_ids,
+          total,
+        })
+        .into_response(),
+      )
     })
   }
 
