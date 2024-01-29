@@ -42,11 +42,20 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx> {
     &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static TxidValue>,
   pub(super) rune_id_to_outpoint:
     &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static OutPointValue>,
+  pub(super) address_to_rune_id: &'a mut MultimapTable<'db, 'tx, &'static [u8], RuneIdValue>,
+  pub(super) address_to_transaction_id:
+    &'a mut MultimapTable<'db, 'tx, &'static [u8], &'static TxidValue>,
   pub(super) updates: HashMap<RuneId, RuneUpdate>,
 }
 
 impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
-  pub(super) fn index_runes(&mut self, index: usize, tx: &Transaction, txid: Txid) -> Result<()> {
+  pub(super) fn index_runes(
+    &mut self,
+    index: usize,
+    tx: &Transaction,
+    txid: Txid,
+    network: Network,
+  ) -> Result<()> {
     let runestone = Runestone::from_transaction(tx);
 
     // A mapping of rune ID to un-allocated balance of that rune
@@ -263,6 +272,21 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
             };
 
             allocate(balance, amount, output);
+          }
+
+          if output < tx.output.len() {
+            let tx_output = tx.output[output].clone();
+            if let Ok(address) = Address::from_script(&tx_output.script_pubkey, network) {
+              log::info!("Rune update Address: {:?}", address);
+              let ser_address = serde_json::to_string(&address)?;
+              self.address_to_rune_id.insert(
+                ser_address.as_bytes(),
+                &RuneId::try_from(id).unwrap().store(),
+              )?;
+              self
+                .address_to_transaction_id
+                .insert(ser_address.as_bytes(), &txid.store())?;
+            }
           }
 
           self

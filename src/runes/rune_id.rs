@@ -62,7 +62,7 @@ impl<'de> Deserialize<'de> for RuneId {
   }
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, Hash, Eq, Ord, PartialOrd)]
+#[derive(Debug, Default, PartialEq, Copy, Clone, Hash, Eq, Ord, PartialOrd)]
 pub struct HexRuneId {
   pub height: u32,
   pub index: u16,
