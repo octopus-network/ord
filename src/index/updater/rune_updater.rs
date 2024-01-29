@@ -42,11 +42,20 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx> {
     &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static TxidValue>,
   pub(super) rune_id_to_outpoint:
     &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static OutPointValue>,
+  pub(super) address_to_rune_id: &'a mut MultimapTable<'db, 'tx, &'static [u8], RuneIdValue>,
+  pub(super) address_to_transaction_id:
+    &'a mut MultimapTable<'db, 'tx, &'static [u8], &'static TxidValue>,
   pub(super) updates: HashMap<RuneId, RuneUpdate>,
 }
 
 impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
-  pub(super) fn index_runes(&mut self, index: usize, tx: &Transaction, txid: Txid) -> Result<()> {
+  pub(super) fn index_runes(
+    &mut self,
+    indexer: &Index,
+    index: usize,
+    tx: &Transaction,
+    txid: Txid,
+  ) -> Result<()> {
     let runestone = Runestone::from_transaction(tx);
 
     // A mapping of rune ID to un-allocated balance of that rune
@@ -263,6 +272,44 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
             };
 
             allocate(balance, amount, output);
+          }
+
+          let rune = indexer
+            .get_rune_by_id(RuneId::try_from(id).unwrap())
+            .map_err(|e| anyhow::anyhow!("failed to get rune by id: {}", e))?
+            .ok_or(anyhow::anyhow!("rune not found"))?;
+          if let Ok(outpoints) = indexer.get_outpoints(rune) {
+            let holder_address = outpoints
+              .clone()
+              .into_iter()
+              .map(|value| {
+                let result = indexer.inner_api_transaction(value.txid).map(|v| {
+                  let address = &v.vout[value.vout as usize].script_pub_key.address;
+                  address.clone()
+                });
+                result
+              })
+              .collect::<Result<Vec<_>, _>>()?
+              .into_iter()
+              .filter(|address| address.is_some())
+              .map(|address| address.unwrap())
+              .collect::<Vec<_>>();
+
+            for address in holder_address {
+              let address = serde_json::to_string(&address)?;
+              log::info!("[rune updater] Address({:?})", address);
+              self
+                .address_to_rune_id
+                .insert(address.as_bytes(), &RuneId::try_from(id).unwrap().store())?;
+              self
+                .address_to_transaction_id
+                .insert(address.as_bytes(), &txid.store())?;
+            }
+          } else {
+            log::info!(
+              "[rune updater] Rune({:?}) has no outpoints",
+              RuneId::try_from(id).unwrap()
+            );
           }
 
           self

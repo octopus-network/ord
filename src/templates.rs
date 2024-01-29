@@ -1,6 +1,7 @@
 use {super::*, boilerplate::Boilerplate};
 
 pub(crate) use {
+  address::{AddressHolderRuneIdJson, AddressTransactionsJson},
   block::{BlockHtml, BlockJson},
   blocks::{BlocksHtml, BlocksJson},
   children::{ChildrenHtml, ChildrenJson},
@@ -28,6 +29,7 @@ pub(crate) use {
   transaction::{GetRawTransactionResultVinScriptSig, TransactionHtml, TransactionJson},
 };
 
+pub mod address;
 pub mod block;
 pub mod blocks;
 mod children;
