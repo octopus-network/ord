@@ -1,3 +1,10 @@
+use crate::runes::HexRuneId;
+use crate::runes::RunescanEdict;
+use crate::runes::RunescanRunestone;
+use crate::templates::transaction::{
+  RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
+};
+use crate::templates::GetRawTransactionResultVinScriptSig;
 use {
   self::{
     entry::{
@@ -65,6 +72,8 @@ define_multimap_table! { SAT_TO_SEQUENCE_NUMBER, u64, u32 }
 define_multimap_table! { SEQUENCE_NUMBER_TO_CHILDREN, u32, u32 }
 define_multimap_table! { RUNE_ID_TO_TRANSACTION_ID, RuneIdValue, &TxidValue }
 define_multimap_table! { RUNE_ID_TO_OUTPOINT, RuneIdValue, &OutPointValue }
+define_multimap_table! { ADDRESS_TO_RUNE_ID, &[u8], RuneIdValue }
+define_multimap_table! { ADDRESS_TO_TRANSACTION_ID, &[u8], &TxidValue }
 define_table! { HEIGHT_TO_BLOCK_HEADER, u32, &HeaderValue }
 define_table! { HEIGHT_TO_LAST_SEQUENCE_NUMBER, u32, u32 }
 define_table! { HOME_INSCRIPTIONS, u32, InscriptionIdValue }
@@ -322,6 +331,8 @@ impl Index {
         tx.open_multimap_table(SEQUENCE_NUMBER_TO_CHILDREN)?;
         tx.open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?;
         tx.open_multimap_table(RUNE_ID_TO_OUTPOINT)?;
+        tx.open_multimap_table(ADDRESS_TO_RUNE_ID)?;
+        tx.open_multimap_table(ADDRESS_TO_TRANSACTION_ID)?;
         tx.open_table(HEIGHT_TO_BLOCK_HEADER)?;
         tx.open_table(HEIGHT_TO_LAST_SEQUENCE_NUMBER)?;
         tx.open_table(HOME_INSCRIPTIONS)?;
@@ -1503,7 +1514,7 @@ impl Index {
     self.client.get_raw_transaction(&txid, None).into_option()
   }
 
-  pub(crate) fn get_raw_transaction_info(&self, txid: Txid) -> Result<GetRawTransactionResult> {
+  pub(crate) fn get_raw_transaction_info(&self, txid: &Txid) -> Result<GetRawTransactionResult> {
     self
       .client
       .get_raw_transaction_info(&txid, None)
@@ -2179,7 +2190,7 @@ impl Index {
       .collect::<Result<Vec<OutPoint>>>()?
       .len();
 
-    let mut outpoints = rtx
+    let outpoints = rtx
       .open_multimap_table(RUNE_ID_TO_OUTPOINT)?
       .get(id.value())?
       .skip(usize::try_from(page_index.saturating_mul(page_size)).map_err(|e| anyhow::anyhow!(e))?)
@@ -2191,13 +2202,242 @@ impl Index {
       })
       .collect::<Result<Vec<OutPoint>>>()?;
 
-    let more = outpoints.len() > page_size;
+    Ok((outpoints, total))
+  }
 
-    if more {
-      outpoints.pop();
+  pub(crate) fn get_address_txs(
+    &self,
+    address: String,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<Txid>, usize)> {
+    let rtx = self.database.begin_read()?;
+
+    let address_to_txid = rtx.open_multimap_table(ADDRESS_TO_TRANSACTION_ID)?;
+    let total = address_to_txid
+      .get(address.as_bytes())?
+      .map(|result| {
+        result
+          .and_then(|txid| Ok(Txid::load(*txid.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<Txid>>>()?
+      .len();
+
+    let txids = address_to_txid
+      .get(address.as_bytes())?
+      .skip(usize::try_from(page_index.saturating_mul(page_size)).map_err(|e| anyhow::anyhow!(e))?)
+      .take(usize::try_from(page_size.saturating_add(1)).map_err(|e| anyhow::anyhow!(e))?)
+      .map(|result| {
+        result
+          .and_then(|txid| Ok(Txid::load(*txid.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<Txid>>>()?;
+
+    Ok((txids, total))
+  }
+
+  pub(crate) fn get_address_rune_ids(
+    &self,
+    address: String,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<RuneId>, usize)> {
+    let rtx = self.database.begin_read()?;
+
+    let address_to_rune_ids = rtx.open_multimap_table(ADDRESS_TO_RUNE_ID)?;
+    let total = address_to_rune_ids
+      .get(address.as_bytes())?
+      .map(|result| {
+        result
+          .and_then(|rune_id| Ok(RuneId::load(rune_id.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<RuneId>>>()?
+      .len();
+
+    let rune_ids = address_to_rune_ids
+      .get(address.as_bytes())?
+      .skip(usize::try_from(page_index.saturating_mul(page_size)).map_err(|e| anyhow::anyhow!(e))?)
+      .take(usize::try_from(page_size.saturating_add(1)).map_err(|e| anyhow::anyhow!(e))?)
+      .map(|result| {
+        result
+          .and_then(|rune_id| Ok(RuneId::load(rune_id.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<RuneId>>>()?;
+
+    Ok((rune_ids, total))
+  }
+
+  pub(crate) fn get_outpoints(&self, rune: Rune) -> Result<Vec<OutPoint>> {
+    let rtx = self.database.begin_read()?;
+
+    let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
+    let id = rune_to_rune_id
+      .get(rune.0)?
+      .ok_or(anyhow::anyhow!("rune not found"))?;
+
+    let outpoints = rtx
+      .open_multimap_table(RUNE_ID_TO_OUTPOINT)?
+      .get(id.value())?
+      .map(|result| {
+        result
+          .and_then(|op| Ok(OutPoint::load(*op.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<OutPoint>>>()?;
+
+    Ok(outpoints)
+  }
+
+  pub(crate) fn inner_api_transaction(&self, txid: Txid) -> Result<RawTransactionResult> {
+    let transaction = self.get_raw_transaction_info(&txid)?;
+    let mut result = RawTransactionResult {
+      in_active_chain: transaction.in_active_chain,
+      hex: transaction.hex.clone(),
+      txid: transaction.txid,
+      hash: transaction.hash,
+      size: transaction.size,
+      vsize: transaction.vsize,
+      version: transaction.version,
+      locktime: transaction.locktime,
+      vin: vec![],
+      vout: vec![],
+      blockhash: transaction.blockhash,
+      confirmations: transaction.confirmations,
+      time: transaction.time,
+      blocktime: transaction.blocktime,
+    };
+
+    for vin in transaction.vin.iter() {
+      let vin_txid = vin.txid.ok_or(anyhow::anyhow!(format!(
+        "vin.txid {:?} not found",
+        vin.txid
+      )))?;
+      let vin_vout = vin.vout.ok_or(anyhow::anyhow!(format!(
+        "vin.vout {:?} not found",
+        vin.vout
+      )))?;
+
+      let tx_out = self
+        .get_transaction(vin_txid)?
+        .ok_or(anyhow::anyhow!("txid {vin_txid} not found"))?
+        .output
+        .into_iter()
+        .nth(vin_vout as usize)
+        .ok_or(anyhow::anyhow!("vout {vin_vout} not found"))?;
+
+      let address = Address::from_script(&tx_out.script_pubkey, self.options.chain().network())
+        .map_err(|err| {
+          anyhow::anyhow!(
+            "Address::from_script({}, {}) {:?}",
+            tx_out.script_pubkey,
+            self.options.chain().network(),
+            err
+          )
+        })?;
+
+      let outpoint = OutPoint::new(vin_txid, vin_vout);
+      let runes = self.get_rune_balances_for_outpoint(outpoint)?;
+      let raw_script_sig = vin.script_sig.clone().ok_or(anyhow::anyhow!(
+        "vin.script_sig {:?} not found",
+        vin.script_sig
+      ))?;
+
+      let script_sig = GetRawTransactionResultVinScriptSig {
+        asm: raw_script_sig.asm,
+        hex: raw_script_sig.hex,
+        address: address.to_string(),
+      };
+
+      result.vin.push(RawTransactionResultVin {
+        sequence: vin.sequence,
+        coinbase: vin.coinbase.clone(),
+        txid: vin.txid,
+        vout: vin.vout,
+        value: Amount::from_sat(tx_out.value),
+        script_sig: Some(script_sig),
+        txinwitness: vin.txinwitness.clone(),
+        rune_balances: runes,
+      });
+    }
+    for vout in transaction.vout.iter() {
+      let outpoint = OutPoint::new(txid, vout.n);
+      let runes = self.get_rune_balances_for_outpoint(outpoint)?;
+
+      let mut rtrv = RawTransactionResultVout {
+        value: vout.value,
+        n: vout.n,
+        script_pub_key: vout.script_pub_key.clone(),
+        rune_balances: runes,
+        runestone: None,
+      };
+
+      if vout
+        .script_pub_key
+        .script()
+        .map_err(|e| anyhow::anyhow!(e))?
+        .is_op_return()
+      {
+        if let Some(runestone) =
+          Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
+        {
+          let rune_entry = if let Some(v) = runestone.etching {
+            if let Some(rune) = v.rune {
+              log::info!("rune: {:?}", rune);
+              Some(
+                self
+                  .rune(rune)
+                  .map_err(|e| anyhow::anyhow!(e))?
+                  .ok_or(anyhow::anyhow!("rune not found"))?
+                  .1,
+              )
+            } else {
+              None
+            }
+          } else {
+            None
+          };
+
+          let rune_edicts = runestone
+            .edicts
+            .into_iter()
+            .map(|edict| {
+              log::info!("edict: {:?}", edict);
+              let id = edict.id & 0xffffffffff;
+              let rune_id = RuneId::try_from(id).map_err(|e| anyhow::anyhow!(e))?;
+              let rune = self
+                .get_rune_by_id(rune_id)
+                .map_err(|e| anyhow::anyhow!(e))?
+                .ok_or(anyhow::anyhow!("rune not found"))?;
+
+              Ok(RunescanEdict {
+                id: edict.id,
+                rune,
+                rune_id: HexRuneId::from(rune_id),
+                amount: edict.amount,
+                output: edict.output,
+              })
+            })
+            .collect::<Result<Vec<_>, anyhow::Error>>()?;
+
+          rtrv.runestone = Some(RunescanRunestone {
+            edicts: rune_edicts,
+            etching: runestone.etching,
+            rune_entry,
+            default_output: runestone.default_output,
+            burn: runestone.burn,
+          });
+        } else {
+          rtrv.runestone = None;
+        }
+      }
+      result.vout.push(rtrv);
     }
 
-    Ok((outpoints, total))
+    Ok(result)
   }
 }
 

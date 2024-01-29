@@ -1,17 +1,11 @@
 use crate::runes::HexRuneId;
-use crate::runes::RunescanEdict;
-use crate::runes::RunescanRunestone;
 use crate::templates::rune::RunescanRuneJson;
 use crate::templates::runes::OctupusRunesJson;
-use crate::templates::transaction::{
-  RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
-};
-use crate::templates::GetRawTransactionResultVinScriptSig;
-// use bitcoin::address::Address;
-// use bitcoin::blockdata::script::Script;
-// use bitcoin::hashes::hex::FromHex;
-// use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine};
+use crate::templates::{AddressHolderRuneIdJson, AddressTransactionsJson};
+
+use self::templates::address::AddressRequest;
 use pagination::Pagination;
+
 use {
   self::{
     accept_encoding::AcceptEncoding,
@@ -312,6 +306,14 @@ impl Server {
         .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
         .route("/api/search/*query", get(Self::search_by_path))
+        .route(
+          "/api/address/runes/:address",
+          get(Self::api_address_rune_ids),
+        )
+        .route(
+          "/api/address/transactions/:address",
+          get(Self::api_address_txids),
+        )
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
         .layer(Extension(config))
@@ -1738,7 +1740,7 @@ impl Server {
         .into_iter()
         .map(|id| {
           let index = index.clone();
-          inner_api_transaction(index, id)
+          index.inner_api_transaction(id)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -1783,12 +1785,12 @@ impl Server {
         .into_iter()
         .map(|value| {
           let index = index.clone();
-          let result = inner_api_transaction(index, value.txid).map(|v| {
+          let result = index.inner_api_transaction(value.txid).map(|v| {
             let address = &v.vout[value.vout as usize].script_pub_key.address;
             let amount = v.vout[value.vout as usize].value.to_sat();
             HolderAddressWithAmount {
               address: address.clone(),
-              amount: amount.to_string(),
+              amount,
             }
           });
           result
@@ -1811,8 +1813,79 @@ impl Server {
     Path(txid): Path<Txid>,
   ) -> ServerResult<Response> {
     task::block_in_place(|| {
-      let result = inner_api_transaction(index, txid)?;
+      let result = index.inner_api_transaction(txid)?;
       Ok(Json(result).into_response())
+    })
+  }
+
+  async fn api_address_rune_ids(
+    Extension(index): Extension<Arc<Index>>,
+    Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
+    Query(pagination): Query<Pagination>,
+  ) -> ServerResult<Response> {
+    log::info!(
+      "api_address_rune_ids, address: {:?}, pagination: {:?}",
+      address,
+      pagination
+    );
+    task::block_in_place(|| {
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
+      let address: Address<NetworkUnchecked> =
+        Address::from_str(&address.address).map_err(|e| {
+          ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
+        })?;
+
+      let ser = serde_json::to_string(&address).map_err(|e| {
+        ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
+      })?;
+
+      let (rune_ids, total) = index.get_address_rune_ids(ser.to_string(), page_size, page_index)?;
+      let hex_rune_ids = rune_ids
+        .into_iter()
+        .map(|rune_id| HexRuneId::from(rune_id))
+        .collect::<Vec<_>>();
+
+      Ok(
+        Json(AddressHolderRuneIdJson {
+          rune_ids: hex_rune_ids,
+          total,
+        })
+        .into_response(),
+      )
+    })
+  }
+
+  async fn api_address_txids(
+    Extension(index): Extension<Arc<Index>>,
+    Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
+    Query(pagination): Query<Pagination>,
+  ) -> ServerResult<Response> {
+    log::info!(
+      "api_address_txids, address: {:?}, pagination: {:?}",
+      address,
+      pagination
+    );
+    task::block_in_place(|| {
+      let Pagination {
+        page: page_index,
+        size: page_size,
+      } = pagination;
+
+      let address: Address<NetworkUnchecked> =
+        Address::from_str(&address.address).map_err(|e| {
+          ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
+        })?;
+
+      let ser = serde_json::to_string(&address).map_err(|e| {
+        ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
+      })?;
+
+      let (txids, total) = index.get_address_txs(ser.to_string(), page_size, page_index)?;
+      Ok(Json(AddressTransactionsJson { txids, total }).into_response())
     })
   }
 
@@ -1826,179 +1899,6 @@ impl Server {
 
     Redirect::to(&destination)
   }
-}
-
-fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTransactionResult> {
-  let transaction = index.get_raw_transaction_info(txid)?;
-  let mut result = RawTransactionResult {
-    in_active_chain: transaction.in_active_chain,
-    hex: transaction.hex.clone(),
-    txid: transaction.txid,
-    hash: transaction.hash,
-    size: transaction.size,
-    vsize: transaction.vsize,
-    version: transaction.version,
-    locktime: transaction.locktime,
-    vin: vec![],
-    vout: vec![],
-    blockhash: transaction.blockhash,
-    confirmations: transaction.confirmations,
-    time: transaction.time,
-    blocktime: transaction.blocktime,
-  };
-
-  for vin in transaction.vin.iter() {
-    let vin_txid = vin.txid.ok_or(anyhow::anyhow!(format!(
-      "vin.txid {:?} not found",
-      vin.txid
-    )))?;
-    let vin_vout = vin.vout.ok_or(anyhow::anyhow!(format!(
-      "vin.vout {:?} not found",
-      vin.vout
-    )))?;
-
-    let value = index
-      .get_transaction(vin_txid)?
-      .ok_or_not_found(|| format!("txid {vin_txid} not found"))?
-      .output
-      .into_iter()
-      .nth(vin_vout as usize)
-      .ok_or_not_found(|| format!("vout {vin_vout} not found"))?
-      .value;
-
-    let outpoint = OutPoint::new(vin_txid, vin_vout);
-    let runes = index.get_rune_balances_for_outpoint(outpoint)?;
-    let raw_script_sig = vin.script_sig.clone().ok_or(anyhow::anyhow!(
-      "vin.script_sig {:?} not found",
-      vin.script_sig
-    ))?;
-    // log::info!("raw_script_sig: {:?}", raw_script_sig);
-
-    // let address = if raw_script_sig.asm.len() == 0 {
-    //   "".to_string()
-    // } else {
-    //   let script_hex = &raw_script_sig.asm[4..];
-    //   log::info!("script_hex: {}", script_hex);
-    //   let pubkey_hash = <[u8; 20]>::from_hex(script_hex).map_err(|e| anyhow::anyhow!(e))?;
-    //   let mut engine = sha256::Hash::engine();
-    //   // 提取见证版本和长度
-    //   let mut version = [0; 1];
-    //   hex::decode_to_slice(&raw_script_sig.asm[0..2], &mut version as &mut [u8])
-    //     .map_err(|e| anyhow::anyhow!(e))?;
-    //   log::info!("version: {:?}", version);
-    //   let mut length = [0; 1];
-    //   hex::decode_to_slice(&raw_script_sig.asm[2..4], &mut length as &mut [u8])
-    //     .map_err(|e| anyhow::anyhow!(e))?;
-    //   log::info!("version: {:?}", version);
-
-    //   engine.input(&[version[0], length[0]]);
-    //   engine.input(&pubkey_hash);
-    //   let witness_program_hash =
-    //     ripemd160::Hash::hash(&sha256::Hash::from_engine(engine).to_byte_array());
-
-    //   // 手动构建P2SH脚本
-    //   let mut script_data = vec![0xa9, 0x14]; // OP_HASH160, push 20 bytes
-    //   script_data.extend_from_slice(&witness_program_hash[..]);
-    //   script_data.push(0x87); // OP_EQUAL
-
-    //   let script = Script::from_bytes(&script_data);
-    //   let network = index.options().chain().network();
-    //   let address = Address::from_script(&script, network).map_err(|e| anyhow::anyhow!(e))?;
-    //   address.to_string()
-    // };
-
-    let script_sig = GetRawTransactionResultVinScriptSig {
-      asm: raw_script_sig.asm,
-      hex: raw_script_sig.hex,
-      address: String::new(),
-    };
-
-    result.vin.push(RawTransactionResultVin {
-      sequence: vin.sequence,
-      coinbase: vin.coinbase.clone(),
-      txid: vin.txid,
-      vout: vin.vout,
-      value: Amount::from_sat(value),
-      script_sig: Some(script_sig),
-      txinwitness: vin.txinwitness.clone(),
-      rune_balances: runes,
-    });
-  }
-  for vout in transaction.vout.iter() {
-    let outpoint = OutPoint::new(txid, vout.n);
-    let runes = index.get_rune_balances_for_outpoint(outpoint)?;
-
-    let mut rtrv = RawTransactionResultVout {
-      value: vout.value,
-      n: vout.n,
-      script_pub_key: vout.script_pub_key.clone(),
-      rune_balances: runes,
-      runestone: None,
-    };
-
-    if vout
-      .script_pub_key
-      .script()
-      .map_err(|e| anyhow::anyhow!(e))?
-      .is_op_return()
-    {
-      if let Some(runestone) =
-        Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
-      {
-        let rune_entry = if let Some(v) = runestone.etching {
-          if let Some(rune) = v.rune {
-            log::info!("rune: {:?}", rune);
-            Some(
-              index
-                .rune(rune)
-                .map_err(|e| anyhow::anyhow!(e))?
-                .ok_or(anyhow::anyhow!("rune not found"))?
-                .1,
-            )
-          } else {
-            None
-          }
-        } else {
-          None
-        };
-
-        let rune_edicts = runestone
-          .edicts
-          .into_iter()
-          .map(|edict| {
-            log::info!("edict: {:?}", edict);
-            let id = edict.id & 0xffffffffff;
-            let rune_id = RuneId::try_from(id).map_err(|e| anyhow::anyhow!(e))?;
-            let rune = index
-              .get_rune_by_id(rune_id)
-              .map_err(|e| anyhow::anyhow!(e))?
-              .ok_or(anyhow::anyhow!("rune not found"))?;
-
-            Ok(RunescanEdict {
-              id: edict.id,
-              rune: rune.to_string(),
-              rune_id: format!("{:x}", u128::from(rune_id)),
-              amount: edict.amount,
-              output: edict.output,
-            })
-          })
-          .collect::<Result<Vec<_>, anyhow::Error>>()?;
-
-        rtrv.runestone = Some(RunescanRunestone {
-          edicts: rune_edicts,
-          etching: runestone.etching,
-          rune_entry,
-          default_output: runestone.default_output,
-          burn: runestone.burn,
-        });
-      } else {
-        rtrv.runestone = None;
-      }
-    }
-    result.vout.push(rtrv);
-  }
-
-  Ok(result)
 }
 
 #[cfg(test)]
