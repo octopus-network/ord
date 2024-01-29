@@ -1,8 +1,9 @@
 use super::*;
+use crate::runes::HexRuneId;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressHolderRuneIdJson {
-  pub rune_ids: Vec<String>,
+  pub rune_ids: Vec<HexRuneId>,
   pub total: usize,
 }
 

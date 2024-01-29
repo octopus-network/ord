@@ -1823,7 +1823,7 @@ impl Server {
       let (rune_ids, total) = index.get_address_rune_ids(ser.to_string(), page_size, page_index)?;
       let hex_rune_ids = rune_ids
         .into_iter()
-        .map(|rune_id| format!("{:x}", u128::from(rune_id)))
+        .map(|rune_id| HexRuneId::from(rune_id))
         .collect::<Vec<_>>();
 
       Ok(

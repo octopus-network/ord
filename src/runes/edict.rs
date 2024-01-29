@@ -11,7 +11,7 @@ pub struct Edict {
 pub struct RunescanEdict {
   pub id: u128,
   pub rune: String,
-  pub rune_id: String,
+  pub rune_id: HexRuneId,
   pub amount: u128,
   pub output: u128,
 }

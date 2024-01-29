@@ -1,3 +1,4 @@
+use crate::runes::HexRuneId;
 use crate::runes::RunescanEdict;
 use crate::runes::RunescanRunestone;
 use crate::templates::transaction::{
@@ -2458,7 +2459,7 @@ impl Index {
               Ok(RunescanEdict {
                 id: edict.id,
                 rune: rune.to_string(),
-                rune_id: format!("{:x}", u128::from(rune_id)),
+                rune_id: HexRuneId::from(rune_id),
                 amount: edict.amount,
                 output: edict.output,
               })
