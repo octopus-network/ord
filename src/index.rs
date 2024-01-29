@@ -2458,7 +2458,7 @@ impl Index {
 
               Ok(RunescanEdict {
                 id: edict.id,
-                rune: rune.to_string(),
+                rune,
                 rune_id: HexRuneId::from(rune_id),
                 amount: edict.amount,
                 output: edict.output,

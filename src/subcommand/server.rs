@@ -1767,7 +1767,7 @@ impl Server {
             let amount = v.vout[value.vout as usize].value.to_sat();
             HolderAddressWithAmount {
               address: address.clone(),
-              amount: amount.to_string(),
+              amount,
             }
           });
           result
