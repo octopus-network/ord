@@ -7,10 +7,10 @@ use crate::templates::transaction::{
   RawTransactionResult, RawTransactionResultVin, RawTransactionResultVout,
 };
 use crate::templates::GetRawTransactionResultVinScriptSig;
-use bitcoin::address::Address;
-use bitcoin::blockdata::script::Script;
-use bitcoin::hashes::hex::FromHex;
-use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine};
+// use bitcoin::address::Address;
+// use bitcoin::blockdata::script::Script;
+// use bitcoin::hashes::hex::FromHex;
+// use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine};
 use pagination::Pagination;
 use {
   self::{
@@ -1849,45 +1849,45 @@ fn inner_api_transaction(index: Arc<Index>, txid: Txid) -> ServerResult<RawTrans
       "vin.script_sig {:?} not found",
       vin.script_sig
     ))?;
-    log::info!("raw_script_sig: {:?}", raw_script_sig);
+    // log::info!("raw_script_sig: {:?}", raw_script_sig);
 
-    let address = if raw_script_sig.asm.len() == 0 {
-      "".to_string()
-    } else {
-      let script_hex = &raw_script_sig.asm[4..];
-      log::info!("script_hex: {}", script_hex);
-      let pubkey_hash = <[u8; 20]>::from_hex(script_hex).map_err(|e| anyhow::anyhow!(e))?;
-      let mut engine = sha256::Hash::engine();
-      // 提取见证版本和长度
-      let mut version = [0; 1];
-      hex::decode_to_slice(&raw_script_sig.asm[0..2], &mut version as &mut [u8])
-        .map_err(|e| anyhow::anyhow!(e))?;
-      log::info!("version: {:?}", version);
-      let mut length = [0; 1];
-      hex::decode_to_slice(&raw_script_sig.asm[2..4], &mut length as &mut [u8])
-        .map_err(|e| anyhow::anyhow!(e))?;
-      log::info!("version: {:?}", version);
+    // let address = if raw_script_sig.asm.len() == 0 {
+    //   "".to_string()
+    // } else {
+    //   let script_hex = &raw_script_sig.asm[4..];
+    //   log::info!("script_hex: {}", script_hex);
+    //   let pubkey_hash = <[u8; 20]>::from_hex(script_hex).map_err(|e| anyhow::anyhow!(e))?;
+    //   let mut engine = sha256::Hash::engine();
+    //   // 提取见证版本和长度
+    //   let mut version = [0; 1];
+    //   hex::decode_to_slice(&raw_script_sig.asm[0..2], &mut version as &mut [u8])
+    //     .map_err(|e| anyhow::anyhow!(e))?;
+    //   log::info!("version: {:?}", version);
+    //   let mut length = [0; 1];
+    //   hex::decode_to_slice(&raw_script_sig.asm[2..4], &mut length as &mut [u8])
+    //     .map_err(|e| anyhow::anyhow!(e))?;
+    //   log::info!("version: {:?}", version);
 
-      engine.input(&[version[0], length[0]]);
-      engine.input(&pubkey_hash);
-      let witness_program_hash =
-        ripemd160::Hash::hash(&sha256::Hash::from_engine(engine).to_byte_array());
+    //   engine.input(&[version[0], length[0]]);
+    //   engine.input(&pubkey_hash);
+    //   let witness_program_hash =
+    //     ripemd160::Hash::hash(&sha256::Hash::from_engine(engine).to_byte_array());
 
-      // 手动构建P2SH脚本
-      let mut script_data = vec![0xa9, 0x14]; // OP_HASH160, push 20 bytes
-      script_data.extend_from_slice(&witness_program_hash[..]);
-      script_data.push(0x87); // OP_EQUAL
+    //   // 手动构建P2SH脚本
+    //   let mut script_data = vec![0xa9, 0x14]; // OP_HASH160, push 20 bytes
+    //   script_data.extend_from_slice(&witness_program_hash[..]);
+    //   script_data.push(0x87); // OP_EQUAL
 
-      let script = Script::from_bytes(&script_data);
-      let network = index.options().chain().network();
-      let address = Address::from_script(&script, network).map_err(|e| anyhow::anyhow!(e))?;
-      address.to_string()
-    };
+    //   let script = Script::from_bytes(&script_data);
+    //   let network = index.options().chain().network();
+    //   let address = Address::from_script(&script, network).map_err(|e| anyhow::anyhow!(e))?;
+    //   address.to_string()
+    // };
 
     let script_sig = GetRawTransactionResultVinScriptSig {
       asm: raw_script_sig.asm,
       hex: raw_script_sig.hex,
-      address,
+      address: String::new(),
     };
 
     result.vin.push(RawTransactionResultVin {
