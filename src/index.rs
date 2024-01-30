@@ -900,20 +900,8 @@ impl Index {
 
     let rune_id = RuneId::load(id);
     let runescan_entry = RunescanRuneEntry {
-      burned: entry.burned,
-      deadline: entry.deadline,
-      divisibility: entry.divisibility,
-      end: entry.end,
-      etching: entry.etching,
-      limit: entry.limit,
-      mints: entry.mints,
-      number: entry.number,
-      rune: entry.rune,
+      rune_entry: entry,
       rune_id: HexRuneId::from(rune_id),
-      spacers: entry.spacers,
-      supply: entry.supply,
-      symbol: entry.symbol,
-      timestamp: entry.timestamp,
     };
 
     Ok(Some((runescan_entry, parent)))
@@ -968,20 +956,8 @@ impl Index {
     let runescan_rune_entry = entries
       .into_iter()
       .map(|(id, entry)| RunescanRuneEntry {
-        burned: entry.burned,
-        deadline: entry.deadline,
-        divisibility: entry.divisibility,
-        end: entry.end,
-        etching: entry.etching,
-        limit: entry.limit,
-        mints: entry.mints,
-        number: entry.number,
-        rune: entry.rune,
+        rune_entry: entry,
         rune_id: HexRuneId::from(id),
-        spacers: entry.spacers,
-        supply: entry.supply,
-        symbol: entry.symbol,
-        timestamp: entry.timestamp,
       })
       .collect::<Vec<_>>();
 
