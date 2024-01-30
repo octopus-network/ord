@@ -43,6 +43,7 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx> {
   pub(super) rune_id_to_outpoint:
     &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static OutPointValue>,
   pub(super) address_to_rune_id: &'a mut MultimapTable<'db, 'tx, &'static [u8], RuneIdValue>,
+  pub(super) rune_id_to_address: &'a mut MultimapTable<'db, 'tx, RuneIdValue, &'static [u8]>,
   pub(super) address_to_transaction_id:
     &'a mut MultimapTable<'db, 'tx, &'static [u8], &'static TxidValue>,
   pub(super) updates: HashMap<RuneId, RuneUpdate>,
@@ -279,9 +280,14 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
             if let Ok(address) = Address::from_script(&tx_output.script_pubkey, network) {
               log::info!("Rune update Address: {:?}", address);
               let ser_address = serde_json::to_string(&address)?;
+
               self.address_to_rune_id.insert(
                 ser_address.as_bytes(),
                 &RuneId::try_from(id).unwrap().store(),
+              )?;
+              self.rune_id_to_address.insert(
+                RuneId::try_from(id).unwrap().store(),
+                ser_address.as_bytes(),
               )?;
               self
                 .address_to_transaction_id

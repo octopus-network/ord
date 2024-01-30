@@ -73,6 +73,7 @@ define_multimap_table! { SEQUENCE_NUMBER_TO_CHILDREN, u32, u32 }
 define_multimap_table! { RUNE_ID_TO_TRANSACTION_ID, RuneIdValue, &TxidValue }
 define_multimap_table! { RUNE_ID_TO_OUTPOINT, RuneIdValue, &OutPointValue }
 define_multimap_table! { ADDRESS_TO_RUNE_ID, &[u8], RuneIdValue }
+define_multimap_table! { RUNE_ID_TO_ADDRESS, RuneIdValue, &[u8] }
 define_multimap_table! { ADDRESS_TO_TRANSACTION_ID, &[u8], &TxidValue }
 define_table! { HEIGHT_TO_BLOCK_HEADER, u32, &HeaderValue }
 define_table! { HEIGHT_TO_LAST_SEQUENCE_NUMBER, u32, u32 }
@@ -332,6 +333,7 @@ impl Index {
         tx.open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?;
         tx.open_multimap_table(RUNE_ID_TO_OUTPOINT)?;
         tx.open_multimap_table(ADDRESS_TO_RUNE_ID)?;
+        tx.open_multimap_table(RUNE_ID_TO_ADDRESS)?;
         tx.open_multimap_table(ADDRESS_TO_TRANSACTION_ID)?;
         tx.open_table(HEIGHT_TO_BLOCK_HEADER)?;
         tx.open_table(HEIGHT_TO_LAST_SEQUENCE_NUMBER)?;
@@ -2257,7 +2259,7 @@ impl Index {
     Ok((txids, total))
   }
 
-  pub(crate) fn get_address_rune_ids(
+  pub(crate) fn get_address_runes(
     &self,
     address: String,
     page_size: usize,
@@ -2290,17 +2292,29 @@ impl Index {
     Ok((rune_ids, total))
   }
 
-  pub(crate) fn get_outpoints(&self, rune: Rune) -> Result<Vec<OutPoint>> {
+  pub(crate) fn get_rune_id_by_address(&self, address: String) -> Result<Vec<RuneId>> {
     let rtx = self.database.begin_read()?;
 
-    let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
-    let id = rune_to_rune_id
-      .get(rune.0)?
-      .ok_or(anyhow::anyhow!("rune not found"))?;
+    let address_to_rune_ids = rtx.open_multimap_table(ADDRESS_TO_RUNE_ID)?;
+
+    let rune_ids = address_to_rune_ids
+      .get(address.as_bytes())?
+      .map(|result| {
+        result
+          .and_then(|rune_id| Ok(RuneId::load(rune_id.value())))
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<RuneId>>>()?;
+
+    Ok(rune_ids)
+  }
+
+  pub(crate) fn get_outpoints(&self, rune_id: &RuneId) -> Result<Vec<OutPoint>> {
+    let rtx = self.database.begin_read()?;
 
     let outpoints = rtx
       .open_multimap_table(RUNE_ID_TO_OUTPOINT)?
-      .get(id.value())?
+      .get((rune_id.height, rune_id.index))?
       .map(|result| {
         result
           .and_then(|op| Ok(OutPoint::load(*op.value())))
@@ -2309,6 +2323,45 @@ impl Index {
       .collect::<Result<Vec<OutPoint>>>()?;
 
     Ok(outpoints)
+  }
+
+  pub(crate) fn get_address_by_rune_id(
+    &self,
+    rune_id: RuneId,
+    page_size: usize,
+    page_index: usize,
+  ) -> Result<(Vec<String>, usize)> {
+    let rtx = self.database.begin_read()?;
+
+    let address_to_rune_ids = rtx.open_multimap_table(RUNE_ID_TO_ADDRESS)?;
+    let total = address_to_rune_ids
+      .get((rune_id.height, rune_id.index))?
+      .map(|result| {
+        result
+          .and_then(|address| {
+            String::from_utf8(address.value().to_vec())
+              .map_err(|e| StorageError::Corrupted(e.to_string()))
+          })
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<String>>>()?
+      .len();
+
+    let address = address_to_rune_ids
+      .get((rune_id.height, rune_id.index))?
+      .skip(usize::try_from(page_index.saturating_mul(page_size)).map_err(|e| anyhow::anyhow!(e))?)
+      .take(usize::try_from(page_size.saturating_add(1)).map_err(|e| anyhow::anyhow!(e))?)
+      .map(|result| {
+        result
+          .and_then(|address| {
+            String::from_utf8(address.value().to_vec())
+              .map_err(|e| StorageError::Corrupted(e.to_string()))
+          })
+          .map_err(|err| err.into())
+      })
+      .collect::<Result<Vec<String>>>()?;
+
+    Ok((address, total))
   }
 
   pub(crate) fn inner_api_transaction(&self, txid: Txid) -> Result<RawTransactionResult> {
