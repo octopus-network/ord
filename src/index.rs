@@ -2433,11 +2433,9 @@ impl Index {
                 .ok_or(anyhow::anyhow!("rune not found"))?;
 
               Ok(RunescanEdict {
-                id: edict.id,
                 rune,
                 rune_id: HexRuneId::from(rune_id),
-                amount: edict.amount,
-                output: edict.output,
+                edict,
               })
             })
             .collect::<Result<Vec<_>, anyhow::Error>>()?;
