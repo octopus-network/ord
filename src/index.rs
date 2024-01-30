@@ -895,20 +895,8 @@ impl Index {
 
     let rune_id = RuneId::load(id);
     let runescan_entry = RunescanRuneEntry {
-      burned: entry.burned,
-      deadline: entry.deadline,
-      divisibility: entry.divisibility,
-      end: entry.end,
-      etching: entry.etching,
-      limit: entry.limit,
-      mints: entry.mints,
-      number: entry.number,
-      rune: entry.rune.to_string(),
-      rune_id: format!("{:x}", u128::from(rune_id)),
-      spacers: entry.spacers,
-      supply: entry.supply,
-      symbol: entry.symbol,
-      timestamp: entry.timestamp,
+      rune_entry: entry,
+      rune_id: HexRuneId::from(rune_id),
     };
 
     Ok(Some((runescan_entry, parent)))
@@ -963,20 +951,8 @@ impl Index {
     let runescan_rune_entry = entries
       .into_iter()
       .map(|(id, entry)| RunescanRuneEntry {
-        burned: entry.burned,
-        deadline: entry.deadline,
-        divisibility: entry.divisibility,
-        end: entry.end,
-        etching: entry.etching,
-        limit: entry.limit,
-        mints: entry.mints,
-        number: entry.number,
-        rune: entry.rune.to_string(),
-        rune_id: format!("{:x}", u128::from(id)),
-        spacers: entry.spacers,
-        supply: entry.supply,
-        symbol: entry.symbol,
-        timestamp: entry.timestamp,
+        rune_entry: entry,
+        rune_id: HexRuneId::from(id),
       })
       .collect::<Vec<_>>();
 
@@ -2384,16 +2360,13 @@ impl Index {
         if let Some(runestone) =
           Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
         {
-          let rune_entry = if let Some(v) = runestone.etching {
-            if let Some(rune) = v.rune {
-              log::info!("rune: {:?}", rune);
-              Some(
-                self
-                  .rune(rune)
-                  .map_err(|e| anyhow::anyhow!(e))?
-                  .ok_or(anyhow::anyhow!("rune not found"))?
-                  .1,
-              )
+          let rune_entry = if let Some(Etching {
+            rune: Some(rune), ..
+          }) = runestone.etching
+          {
+            log::info!("rune: {:?}", rune);
+            if let Ok(Some(rune)) = self.rune(rune) {
+              Some(rune.1)
             } else {
               None
             }
@@ -2408,17 +2381,13 @@ impl Index {
               log::info!("edict: {:?}", edict);
               let id = edict.id & 0xffffffffff;
               let rune_id = RuneId::try_from(id).map_err(|e| anyhow::anyhow!(e))?;
-              let rune = self
-                .get_rune_by_id(rune_id)
-                .map_err(|e| anyhow::anyhow!(e))?
-                .ok_or(anyhow::anyhow!("rune not found"))?;
+
+              let rune = self.get_rune_by_id(rune_id).ok().flatten();
 
               Ok(RunescanEdict {
-                id: edict.id,
                 rune,
-                rune_id: HexRuneId::from(rune_id),
-                amount: edict.amount,
-                output: edict.output,
+                rune_id: Some(HexRuneId::from(rune_id)),
+                edict,
               })
             })
             .collect::<Result<Vec<_>, anyhow::Error>>()?;
