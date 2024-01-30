@@ -1910,7 +1910,6 @@ impl Server {
         .into_iter()
         .map(|txid| index.inner_api_transaction(txid))
         .collect::<Result<Vec<_>, _>>()?;
-
       Ok(Json(AddressTransactionsJson { txs, total }).into_response())
     })
   }
