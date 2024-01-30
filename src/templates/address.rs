@@ -4,7 +4,7 @@ use crate::templates::transaction::RawTransactionResult;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressHolderRuneIdJson {
-  pub rune_ids: Vec<AddressHolderItem>,
+  pub runes: Vec<AddressHolderItem>,
   pub total: usize,
 }
 
@@ -12,7 +12,7 @@ pub struct AddressHolderRuneIdJson {
 pub struct AddressHolderItem {
   pub rune: Rune,
   pub rune_id: HexRuneId,
-  pub amount: u64,
+  pub amount: u128,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
