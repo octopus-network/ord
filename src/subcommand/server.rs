@@ -1749,31 +1749,27 @@ impl Server {
       let rune_id = RuneId::from(rune_id);
       log::info!("rune_id: {}", rune_id);
 
-      let (address, total) = index.get_address_by_rune_id(rune_id, page_size, page_index)?;
-      let mut holder_address_with_amount = Vec::new();
+      let rune = index
+        .get_rune_by_id(rune_id)?
+        .ok_or_not_found(|| "rune ID")?;
 
-      for addr in address {
-        let rune_ids = index.get_rune_id_by_address(addr.clone())?;
-        log::info!("rune_ids: {:?}", rune_ids);
+      let (outpoints, total) = index.get_outpoints_paginated(rune, page_size, page_index)?;
 
-        for rune_id_left in rune_ids {
-          if rune_id_left == rune_id {
-            let outpoints = index.get_outpoints(&rune_id_left)?;
-            let mut amount = 0;
-            for outpoint in outpoints {
-              amount += index.get_rune_balance(outpoint, rune_id_left)?;
-            }
-            holder_address_with_amount.push(HolderAddressWithAmount {
-              address: trim_quotes(&addr),
+      let holder_address_with_amount = outpoints
+        .clone()
+        .into_iter()
+        .map(|value| {
+          let index = index.clone();
+          index.inner_api_transaction(value.txid).map(|v| {
+            let address = &v.vout[value.vout as usize].script_pub_key.address;
+            let amount = v.vout[value.vout as usize].value.to_sat();
+            HolderAddressWithAmount {
+              address: address.clone(),
               amount,
-            });
-          }
-        }
-      }
-
-      fn trim_quotes(original: &str) -> String {
-        original.trim_matches('\"').to_string()
-      }
+            }
+          })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
       Ok(
         Json(HolderAddressWithAmountJson {
