@@ -1,4 +1,5 @@
 use crate::runes::HexRuneId;
+use crate::templates::address::AddressHolderItem;
 use crate::templates::rune::RunescanRuneJson;
 use crate::templates::runes::OctupusRunesJson;
 use crate::templates::{AddressHolderRuneIdJson, AddressTransactionsJson};
@@ -303,7 +304,7 @@ impl Server {
         )
         .route(
           "/api/address/transactions/:address",
-          get(Self::api_address_txids),
+          get(Self::api_address_txs),
         )
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
@@ -1821,10 +1822,52 @@ impl Server {
       })?;
 
       let (rune_ids, total) = index.get_address_rune_ids(ser.to_string(), page_size, page_index)?;
-      let hex_rune_ids = rune_ids
-        .into_iter()
-        .map(|rune_id| HexRuneId::from(rune_id))
-        .collect::<Vec<_>>();
+
+      let mut hex_rune_ids = Vec::new();
+      for rune_id in rune_ids {
+        let rune = index
+          .get_rune_by_id(rune_id)?
+          .ok_or(ServerError::BadRequest(format!(
+            "Can't find rune by RuneId({:?})",
+            rune_id,
+          )))?;
+
+        let mut amount = 0;
+        if let Ok(outpoints) = index.get_outpoints(rune) {
+          let holder_address_with_amount = outpoints
+            .clone()
+            .into_iter()
+            .map(|value| {
+              let index = index.clone();
+              let result = index.inner_api_transaction(value.txid).map(|v| {
+                let address = &v.vout[value.vout as usize].script_pub_key.address;
+                let amount = v.vout[value.vout as usize].value.to_sat();
+                HolderAddressWithAmount {
+                  address: address.clone(),
+                  amount,
+                }
+              });
+              result
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|v| v.address.is_some())
+            .map(|v| (v.address.unwrap(), v.amount))
+            .collect::<Vec<_>>();
+
+          amount = holder_address_with_amount
+            .iter()
+            .filter(|v| v.0 == address)
+            .map(|v| v.1)
+            .sum::<u64>();
+        }
+
+        hex_rune_ids.push(AddressHolderItem {
+          rune_id: HexRuneId::from(rune_id),
+          rune,
+          amount,
+        });
+      }
 
       Ok(
         Json(AddressHolderRuneIdJson {
@@ -1836,7 +1879,7 @@ impl Server {
     })
   }
 
-  async fn api_address_txids(
+  async fn api_address_txs(
     Extension(index): Extension<Arc<Index>>,
     Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
     Query(pagination): Query<Pagination>,
@@ -1862,7 +1905,13 @@ impl Server {
       })?;
 
       let (txids, total) = index.get_address_txs(ser.to_string(), page_size, page_index)?;
-      Ok(Json(AddressTransactionsJson { txids, total }).into_response())
+
+      let txs = txids
+        .into_iter()
+        .map(|txid| index.inner_api_transaction(txid))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(Json(AddressTransactionsJson { txs, total }).into_response())
     })
   }
 
