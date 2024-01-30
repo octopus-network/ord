@@ -304,7 +304,7 @@ impl Server {
         )
         .route(
           "/api/address/transactions/:address",
-          get(Self::api_address_txids),
+          get(Self::api_address_txs),
         )
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
@@ -1879,7 +1879,7 @@ impl Server {
     })
   }
 
-  async fn api_address_txids(
+  async fn api_address_txs(
     Extension(index): Extension<Arc<Index>>,
     Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
     Query(pagination): Query<Pagination>,
@@ -1905,7 +1905,13 @@ impl Server {
       })?;
 
       let (txids, total) = index.get_address_txs(ser.to_string(), page_size, page_index)?;
-      Ok(Json(AddressTransactionsJson { txids, total }).into_response())
+      // let txs = txids.into_iter().map(|txid| TxidItem { txid }).collect();
+      let mut txs = Vec::new();
+      for txid in txids {
+        let tx_details = index.inner_api_transaction(txid)?;
+        txs.push(tx_details);
+      }
+      Ok(Json(AddressTransactionsJson { txs, total }).into_response())
     })
   }
 

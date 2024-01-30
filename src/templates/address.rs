@@ -1,5 +1,6 @@
 use super::*;
 use crate::runes::HexRuneId;
+use crate::templates::transaction::RawTransactionResult;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressHolderRuneIdJson {
@@ -16,7 +17,7 @@ pub struct AddressHolderItem {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressTransactionsJson {
-  pub txids: Vec<Txid>,
+  pub txs: Vec<RawTransactionResult>,
   pub total: usize,
 }
 
