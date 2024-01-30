@@ -2403,14 +2403,13 @@ impl Index {
         if let Some(runestone) =
           Runestone::from_transaction(&transaction.transaction().map_err(|e| anyhow::anyhow!(e))?)
         {
-          let rune_entry = if let Some(v) = runestone.etching {
-            if let Some(rune) = v.rune {
-              log::info!("rune: {:?}", rune);
-              if let Ok(Some(rune)) = self.rune(rune) {
-                Some(rune.1)
-              } else {
-                None
-              }
+          let rune_entry = if let Some(Etching {
+            rune: Some(rune), ..
+          }) = runestone.etching
+          {
+            log::info!("rune: {:?}", rune);
+            if let Ok(Some(rune)) = self.rune(rune) {
+              Some(rune.1)
             } else {
               None
             }
