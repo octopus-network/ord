@@ -2406,13 +2406,11 @@ impl Index {
           let rune_entry = if let Some(v) = runestone.etching {
             if let Some(rune) = v.rune {
               log::info!("rune: {:?}", rune);
-              Some(
-                self
-                  .rune(rune)
-                  .map_err(|e| anyhow::anyhow!(e))?
-                  .ok_or(anyhow::anyhow!("rune not found"))?
-                  .1,
-              )
+              if let Ok(Some(rune)) = self.rune(rune) {
+                Some(rune.1)
+              } else {
+                None
+              }
             } else {
               None
             }
@@ -2427,14 +2425,12 @@ impl Index {
               log::info!("edict: {:?}", edict);
               let id = edict.id & 0xffffffffff;
               let rune_id = RuneId::try_from(id).map_err(|e| anyhow::anyhow!(e))?;
-              let rune = self
-                .get_rune_by_id(rune_id)
-                .map_err(|e| anyhow::anyhow!(e))?
-                .ok_or(anyhow::anyhow!("rune not found"))?;
+
+              let rune = self.get_rune_by_id(rune_id).ok().flatten();
 
               Ok(RunescanEdict {
                 rune,
-                rune_id: HexRuneId::from(rune_id),
+                rune_id: Some(HexRuneId::from(rune_id)),
                 edict,
               })
             })

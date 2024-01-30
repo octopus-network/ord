@@ -9,8 +9,8 @@ pub struct Edict {
 
 #[derive(Default, Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 pub struct RunescanEdict {
-  pub rune: Rune,
-  pub rune_id: HexRuneId,
+  pub rune: Option<Rune>,
+  pub rune_id: Option<HexRuneId>,
   #[serde(flatten)]
   pub edict: Edict,
 }
