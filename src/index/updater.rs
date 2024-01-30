@@ -591,6 +591,7 @@ impl<'index> Updater<'_> {
       let mut rune_id_to_transaction_id = wtx.open_multimap_table(RUNE_ID_TO_TRANSACTION_ID)?;
       let mut rune_id_to_outpoint = wtx.open_multimap_table(RUNE_ID_TO_OUTPOINT)?;
       let mut address_to_rune_ids = wtx.open_multimap_table(ADDRESS_TO_RUNE_ID)?;
+      let mut rune_id_to_address = wtx.open_multimap_table(RUNE_ID_TO_ADDRESS)?;
       let mut address_to_transaction_id = wtx.open_multimap_table(ADDRESS_TO_TRANSACTION_ID)?;
 
       let runes = statistic_to_count
@@ -613,6 +614,7 @@ impl<'index> Updater<'_> {
         rune_id_to_transaction_id: &mut rune_id_to_transaction_id,
         rune_id_to_outpoint: &mut rune_id_to_outpoint,
         address_to_rune_id: &mut address_to_rune_ids,
+        rune_id_to_address: &mut rune_id_to_address,
         address_to_transaction_id: &mut address_to_transaction_id,
         updates: HashMap::new(),
       };

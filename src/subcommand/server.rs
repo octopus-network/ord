@@ -307,10 +307,7 @@ impl Server {
         .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
         .route("/api/search/*query", get(Self::search_by_path))
-        .route(
-          "/api/address/runes/:address",
-          get(Self::api_address_rune_ids),
-        )
+        .route("/api/address/runes/:address", get(Self::api_address_runes))
         .route(
           "/api/address/transactions/:address",
           get(Self::api_address_txs),
@@ -1775,28 +1772,31 @@ impl Server {
       let rune_id = RuneId::from(rune_id);
       log::info!("rune_id: {}", rune_id);
 
-      let rune = index
-        .get_rune_by_id(rune_id)?
-        .ok_or_not_found(|| "rune ID")?;
+      let (address, total) = index.get_address_by_rune_id(rune_id, page_size, page_index)?;
+      let mut holder_address_with_amount = Vec::new();
 
-      let (outpoints, total) = index.get_outpoints_paginated(rune, page_size, page_index)?;
+      for addr in address {
+        let rune_ids = index.get_rune_id_by_address(addr.clone())?;
+        log::info!("rune_ids: {:?}", rune_ids);
 
-      let holder_address_with_amount = outpoints
-        .clone()
-        .into_iter()
-        .map(|value| {
-          let index = index.clone();
-          let result = index.inner_api_transaction(value.txid).map(|v| {
-            let address = &v.vout[value.vout as usize].script_pub_key.address;
-            let amount = v.vout[value.vout as usize].value.to_sat();
-            HolderAddressWithAmount {
-              address: address.clone(),
-              amount,
+        for rune_id_left in rune_ids {
+          if rune_id_left == rune_id {
+            let outpoints = index.get_outpoints(&rune_id_left)?;
+            let mut amount = 0;
+            for outpoint in outpoints {
+              amount += index.get_rune_balance(outpoint, rune_id_left)?;
             }
-          });
-          result
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+            holder_address_with_amount.push(HolderAddressWithAmount {
+              address: trim_quotes(&addr),
+              amount,
+            });
+          }
+        }
+      }
+
+      fn trim_quotes(original: &str) -> String {
+        original.trim_matches('\"').to_string()
+      }
 
       Ok(
         Json(HolderAddressWithAmountJson {
@@ -1819,13 +1819,13 @@ impl Server {
     })
   }
 
-  async fn api_address_rune_ids(
+  async fn api_address_runes(
     Extension(index): Extension<Arc<Index>>,
     Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     log::info!(
-      "api_address_rune_ids, address: {:?}, pagination: {:?}",
+      "api_address_runes, address: {:?}, pagination: {:?}",
       address,
       pagination
     );
@@ -1844,9 +1844,10 @@ impl Server {
         ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
       })?;
 
-      let (rune_ids, total) = index.get_address_rune_ids(ser.to_string(), page_size, page_index)?;
+      let (rune_ids, total) = index.get_address_runes(ser.to_string(), page_size, page_index)?;
+      log::info!("rune_ids: {:?}", rune_ids);
 
-      let mut hex_rune_ids = Vec::new();
+      let mut runes = Vec::new();
       for rune_id in rune_ids {
         let rune = index
           .get_rune_by_id(rune_id)?
@@ -1854,51 +1855,19 @@ impl Server {
             "Can't find rune by RuneId({:?})",
             rune_id,
           )))?;
-
+        let outpoints = index.get_outpoints(&rune_id)?;
         let mut amount = 0;
-        if let Ok(outpoints) = index.get_outpoints(rune) {
-          let holder_address_with_amount = outpoints
-            .clone()
-            .into_iter()
-            .map(|value| {
-              let index = index.clone();
-              let result = index.inner_api_transaction(value.txid).map(|v| {
-                let address = &v.vout[value.vout as usize].script_pub_key.address;
-                let amount = v.vout[value.vout as usize].value.to_sat();
-                HolderAddressWithAmount {
-                  address: address.clone(),
-                  amount,
-                }
-              });
-              result
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter(|v| v.address.is_some())
-            .map(|v| (v.address.unwrap(), v.amount))
-            .collect::<Vec<_>>();
-
-          amount = holder_address_with_amount
-            .iter()
-            .filter(|v| v.0 == address)
-            .map(|v| v.1)
-            .sum::<u64>();
+        for outpoint in outpoints {
+          amount += index.get_rune_balance(outpoint, rune_id)?;
         }
-
-        hex_rune_ids.push(AddressHolderItem {
+        runes.push(AddressHolderItem {
           rune_id: HexRuneId::from(rune_id),
           rune,
           amount,
         });
       }
 
-      Ok(
-        Json(AddressHolderRuneIdJson {
-          rune_ids: hex_rune_ids,
-          total,
-        })
-        .into_response(),
-      )
+      Ok(Json(AddressHolderRuneIdJson { runes, total }).into_response())
     })
   }
 
@@ -1933,7 +1902,6 @@ impl Server {
         .into_iter()
         .map(|txid| index.inner_api_transaction(txid))
         .collect::<Result<Vec<_>, _>>()?;
-
       Ok(Json(AddressTransactionsJson { txs, total }).into_response())
     })
   }
