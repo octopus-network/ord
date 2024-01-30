@@ -1905,12 +1905,12 @@ impl Server {
       })?;
 
       let (txids, total) = index.get_address_txs(ser.to_string(), page_size, page_index)?;
-      // let txs = txids.into_iter().map(|txid| TxidItem { txid }).collect();
-      let mut txs = Vec::new();
-      for txid in txids {
-        let tx_details = index.inner_api_transaction(txid)?;
-        txs.push(tx_details);
-      }
+
+      let txs = txids
+        .into_iter()
+        .map(|txid| index.inner_api_transaction(txid))
+        .collect::<Result<Vec<_>, _>>()?;
+
       Ok(Json(AddressTransactionsJson { txs, total }).into_response())
     })
   }
