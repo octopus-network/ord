@@ -35,7 +35,7 @@ pub struct HolderAddressWithAmountJson {
   pub total: usize,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct HolderAddressWithAmount {
   pub address: Address<NetworkUnchecked>,
   pub amount: u64,
