@@ -300,7 +300,7 @@ impl Server {
         .route("/api/search/*query", get(Self::search_by_path))
         .route("/api/address/:address/runes", get(Self::api_address_runes))
         .route(
-          "/api/address/:address/transactions/",
+          "/api/address/:address/transactions",
           get(Self::api_address_txs),
         )
         .layer(Extension(index))
