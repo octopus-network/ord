@@ -298,9 +298,9 @@ impl Server {
         .route("/api/status", get(Self::api_status))
         .route("/api/search", get(Self::search_by_query))
         .route("/api/search/*query", get(Self::search_by_path))
-        .route("/api/address/runes/:address", get(Self::api_address_runes))
+        .route("/api/address/:address/runes", get(Self::api_address_runes))
         .route(
-          "/api/address/transactions/:address",
+          "/api/address/:address/transactions/",
           get(Self::api_address_txs),
         )
         .layer(Extension(index))
