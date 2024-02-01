@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Pile {
   pub amount: u128,
   pub divisibility: u8,

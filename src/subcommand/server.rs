@@ -1824,12 +1824,12 @@ impl Server {
 
   async fn api_address_runes(
     Extension(index): Extension<Arc<Index>>,
-    Path(DeserializeFromStr(address)): Path<DeserializeFromStr<AddressRequest>>,
+    Path(DeserializeFromStr(request)): Path<DeserializeFromStr<AddressRequest>>,
     Query(pagination): Query<Pagination>,
   ) -> ServerResult<Response> {
     log::info!(
       "api_address_runes, address: {:?}, pagination: {:?}",
-      address,
+      request,
       pagination
     );
     task::block_in_place(|| {
@@ -1839,8 +1839,8 @@ impl Server {
       } = pagination;
 
       let address: Address<NetworkUnchecked> =
-        Address::from_str(&address.address).map_err(|e| {
-          ServerError::BadRequest(format!("invalid address: {:?}, err: {}", address, e))
+        Address::from_str(&request.address).map_err(|e| {
+          ServerError::BadRequest(format!("invalid address: {:?}, err: {}", request, e))
         })?;
 
       let ser = serde_json::to_string(&address).map_err(|e| {
@@ -1861,7 +1861,23 @@ impl Server {
         let outpoints = index.get_outpoints(&rune_id)?;
         let mut amount = 0;
         for outpoint in outpoints {
-          amount += index.get_rune_balance(outpoint, rune_id)?;
+          let output = index
+            .get_transaction(outpoint.txid)?
+            .unwrap()
+            .output
+            .into_iter()
+            .nth(outpoint.vout.try_into().unwrap())
+            .unwrap();
+          let addr = index
+            .options()
+            .chain()
+            .address_from_script(&output.script_pubkey)
+            .map(|address| address.to_string())
+            .unwrap_or_else(|e| e.to_string());
+
+          if addr == request.address {
+            amount += index.get_rune_balance(outpoint, rune_id)?;
+          }
         }
         log::info!("Rune({}) have amount: {:?}", rune.to_string(), amount);
         runes.push(AddressHolderItem {
