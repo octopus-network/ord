@@ -56,6 +56,9 @@ impl<'index> Updater<'_> {
   pub(crate) fn update_index(&mut self) -> Result {
     let mut wtx = self.index.begin_write()?;
     let starting_height = u32::try_from(self.index.client.get_block_count()?).unwrap() + 1;
+    if self.height == 0 {
+      self.height = self.index.options.first_rune_height() - 1;
+    }
 
     wtx
       .open_table(WRITE_TRANSACTION_STARTING_BLOCK_COUNT_TO_TIMESTAMP)?
