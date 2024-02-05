@@ -3,18 +3,18 @@ use super::*;
 #[derive(Copy, Clone, Debug)]
 pub(super) enum Tag {
   Body = 0,
-  Flags = 2,
-  Rune = 4,
-  Limit = 6,
-  Term = 8,
+  Flags = 252,
+  Rune = 2,
+  Limit = 4,
+  Term = 6,
   Deadline = 10,
   DefaultOutput = 12,
   #[allow(unused)]
   Burn = 254,
 
   Divisibility = 1,
-  Spacers = 3,
-  Symbol = 5,
+  Spacers = 253,
+  Symbol = 3,
   #[allow(unused)]
   Nop = 255,
 }

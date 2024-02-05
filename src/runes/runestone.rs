@@ -61,14 +61,6 @@ impl Runestone {
 
     let Message { mut fields, edicts } = Message::from_integers(&integers);
 
-    let deadline = Tag::Deadline
-      .take(&mut fields)
-      .and_then(|deadline| u32::try_from(deadline).ok());
-
-    let default_output = Tag::DefaultOutput
-      .take(&mut fields)
-      .and_then(|default| u32::try_from(default).ok());
-
     let divisibility = Tag::Divisibility
       .take(&mut fields)
       .and_then(|divisibility| u8::try_from(divisibility).ok())
@@ -81,12 +73,6 @@ impl Runestone {
 
     let rune = Tag::Rune.take(&mut fields).map(Rune);
 
-    let spacers = Tag::Spacers
-      .take(&mut fields)
-      .and_then(|spacers| u32::try_from(spacers).ok())
-      .and_then(|spacers| (spacers <= MAX_SPACERS).then_some(spacers))
-      .unwrap_or_default();
-
     let symbol = Tag::Symbol
       .take(&mut fields)
       .and_then(|symbol| u32::try_from(symbol).ok())
@@ -96,20 +82,18 @@ impl Runestone {
       .take(&mut fields)
       .and_then(|term| u32::try_from(term).ok());
 
-    let mut flags = Tag::Flags.take(&mut fields).unwrap_or_default();
+    let etch = rune.is_some();
 
-    let etch = Flag::Etch.take(&mut flags);
-
-    let mint = Flag::Mint.take(&mut flags);
+    let mint = term.is_some() || limit.is_some();
 
     let etching = if etch {
       Some(Etching {
         divisibility,
         rune,
-        spacers,
+        spacers: 0,
         symbol,
         mint: mint.then_some(Mint {
-          deadline,
+          deadline: None,
           limit,
           term,
         }),
@@ -119,8 +103,8 @@ impl Runestone {
     };
 
     Ok(Some(Self {
-      burn: flags != 0 || fields.keys().any(|tag| tag % 2 == 0),
-      default_output,
+      burn: fields.keys().any(|tag| tag % 2 == 0),
+      default_output: None,
       edicts,
       etching,
     }))

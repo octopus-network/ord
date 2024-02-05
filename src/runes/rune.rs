@@ -36,33 +36,19 @@ impl Rune {
   ];
 
   pub(crate) fn minimum_at_height(chain: Chain, height: Height) -> Self {
-    let offset = height.0.saturating_add(1);
+    let length = 13u32
+      .saturating_sub(height.0 / (DIFFCHANGE_INTERVAL * 2))
+      .max(1);
 
-    const INTERVAL: u32 = SUBSIDY_HALVING_INTERVAL / 12;
-
-    let start = chain.first_rune_height();
-
-    let end = start + SUBSIDY_HALVING_INTERVAL;
-
-    if offset < start {
-      return Rune(Self::STEPS[12]);
+    let mut rune = 0u128;
+    for i in 0..length {
+      if i > 0 {
+        rune += 1;
+      }
+      rune *= 26;
     }
 
-    if offset >= end {
-      return Rune(0);
-    }
-
-    let progress = offset.saturating_sub(start);
-
-    let length = 12u32.saturating_sub(progress / INTERVAL);
-
-    let end = Self::STEPS[usize::try_from(length - 1).unwrap()];
-
-    let start = Self::STEPS[usize::try_from(length).unwrap()];
-
-    let remainder = u128::from(progress % INTERVAL);
-
-    Rune(start - ((start - end) * remainder / u128::from(INTERVAL)))
+    Rune(rune)
   }
 
   pub(crate) fn is_reserved(self) -> bool {
