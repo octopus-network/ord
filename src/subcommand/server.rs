@@ -35,8 +35,6 @@ use {
     caches::DirCache,
     AcmeConfig,
   },
-  sqlx::postgres::PgPoolOptions,
-  std::env,
   std::{cmp::Ordering, io::Read, str, sync::Arc},
   tokio_stream::StreamExt,
   tower_http::{
@@ -188,28 +186,6 @@ impl Server {
   pub fn run(self, options: Options, index: Arc<Index>, handle: Handle) -> SubcommandResult {
     Runtime::new()?.block_on(async {
       let index_clone = index.clone();
-
-      if options.index_runes {
-        let db_connection_str = match env::var("DATABASE_URL") {
-          Ok(url) => url,
-          Err(error) => {
-            log::warn!("Failed to fetch DATABASE_URL in .env: {error}");
-            "".to_string()
-          }
-        };
-
-        if !db_connection_str.is_empty() {
-          match PgPoolOptions::new().connect(&db_connection_str).await {
-            Ok(pg_pool) => {
-              index_clone.set_pg_pool(pg_pool);
-              log::info!("Set up Postgres connection pool");
-            }
-            Err(error) => {
-              log::warn!("Can't connect to Postgres database: {error}");
-            }
-          }
-        }
-      }
 
       let index_thread = thread::spawn(move || loop {
         if SHUTTING_DOWN.load(atomic::Ordering::Relaxed) {

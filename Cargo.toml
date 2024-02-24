@@ -68,7 +68,7 @@ tokio-util = {version = "0.7.3", features = ["compat"] }
 tower-http = { version = "0.4.0", features = ["compression-br", "compression-gzip", "cors", "set-header"] }
 
 # tokio + rustls
-sqlx = { version = "0.7", features = [ "runtime-tokio", "tls-rustls", "postgres"] }
+sqlx = { version = "0.7", features = [ "runtime-tokio", "tls-rustls", "any", "postgres", "chrono"] }
 
 [dev-dependencies]
 criterion = "0.5.1"

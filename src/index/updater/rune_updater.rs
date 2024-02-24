@@ -1,5 +1,6 @@
 use {
   super::*,
+  crate::index::entry::TxInput,
   crate::runes::{varint, Edict, Runestone, CLAIM_BIT},
 };
 
@@ -24,7 +25,7 @@ pub(crate) struct RuneUpdate {
   pub(crate) supply: u128,
 }
 
-pub(super) struct RuneUpdater<'a, 'db, 'tx> {
+pub(super) struct RuneUpdater<'a, 'db, 'tx, 'index> {
   pub(super) height: u32,
   pub(super) id_to_entry: &'a mut Table<'db, 'tx, RuneIdValue, RuneEntryValue>,
   pub(super) inscription_id_to_sequence_number: &'a Table<'db, 'tx, InscriptionIdValue, u32>,
@@ -37,17 +38,24 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx> {
   pub(super) timestamp: u32,
   pub(super) transaction_id_to_rune: &'a mut Table<'db, 'tx, &'static TxidValue, u128>,
   pub(super) updates: HashMap<RuneId, RuneUpdate>,
+  pub(super) index: &'index Index,
 }
 
-impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
+impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
   pub(super) fn index_runes(&mut self, index: usize, tx: &Transaction, txid: Txid) -> Result<()> {
     let runestone = Runestone::from_transaction(tx);
 
     // A mapping of rune ID to un-allocated balance of that rune
     let mut unallocated: HashMap<u128, u128> = HashMap::new();
+    let mut tx_inputs: Vec<TxInput> = Vec::new();
 
     // Increment unallocated runes with the runes in this transaction's inputs
     for input in &tx.input {
+      let mut n = 0;
+      let tx_input = TxInput::from_txin(input, &txid, n);
+      tx_inputs.push(tx_input);
+      n += 1;
+
       if let Some(guard) = self
         .outpoint_to_balances
         .remove(&input.previous_output.store())?
@@ -62,6 +70,9 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
           *unallocated.entry(id).or_default() += balance;
         }
       }
+    }
+    if tx_inputs.len() > 0 {
+      self.pg_insert_tx_inputs(tx_inputs)?;
     }
 
     let burn = runestone
@@ -406,6 +417,44 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
         .entry(RuneId::try_from(id).unwrap())
         .or_default()
         .burned += amount;
+    }
+
+    Ok(())
+  }
+
+  // PostgreSQL
+  pub(crate) fn pg_insert_tx_inputs(&self, tx_inputs: Vec<TxInput>) -> Result<()> {
+    if let Some(pg_pool) = &self.index.pg_pool {
+      Runtime::new()?.block_on(async {
+        for tx_input in tx_inputs {
+          let result = sqlx::query!(
+            r#"
+            INSERT INTO public.tx_inputs (
+                tx_id, n, prevout_tx_id, prevout, script_sig, sequence, witness
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (tx_id, n) DO NOTHING
+            "#,
+            tx_input.tx_id,
+            tx_input.n,
+            tx_input.prevout_tx_id,
+            tx_input.prevout,
+            tx_input.script_sig,
+            tx_input.sequence,
+            tx_input.witness
+          )
+          .execute(pg_pool)
+          .await;
+
+          match result {
+            Ok(record) => {
+              log::info!("INSERT INTO public.tx_inputs: {}", tx_input.tx_id);
+            }
+            Err(error) => {
+              log::error!("An error occurred INSERT INTO public.tx_inputs: {}", error);
+            }
+          }
+        }
+      })
     }
 
     Ok(())

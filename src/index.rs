@@ -23,7 +23,8 @@ use {
     ReadOnlyTable, ReadableMultimapTable, ReadableTable, RepairSession, StorageError, Table,
     TableDefinition, TableHandle, TableStats, WriteTransaction,
   },
-  sqlx::postgres::PgPool,
+  sqlx::postgres::{PgPool, PgPoolOptions, PgRow},
+  std::env,
   std::{
     collections::HashMap,
     io::{BufWriter, Write},
@@ -201,7 +202,7 @@ impl<T> BitcoinCoreRpcResultExt<T> for Result<T, bitcoincore_rpc::Error> {
 pub struct Index {
   client: Client,
   database: Database,
-  pg_pool: Mutex<Option<PgPool>>,
+  pg_pool: Option<PgPool>,
   durability: redb::Durability,
   first_inscription_height: u32,
   genesis_block_coinbase_transaction: Transaction,
@@ -394,11 +395,37 @@ impl Index {
     let genesis_block_coinbase_transaction =
       options.chain().genesis_block().coinbase().unwrap().clone();
 
+    let mut pg_pool: Option<PgPool> = None;
+    if options.index_runes {
+      let db_connection_str = match env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(error) => {
+          log::warn!("Failed to fetch DATABASE_URL in .env: {error}");
+          "".to_string()
+        }
+      };
+
+      if !db_connection_str.is_empty() {
+        pg_pool = Runtime::new()?.block_on(async {
+          match PgPoolOptions::new().connect(&db_connection_str).await {
+            Ok(pool) => {
+              log::info!("Set up Postgres connection pool");
+              Some(pool)
+            }
+            Err(error) => {
+              log::warn!("Can't connect to Postgres database: {error}");
+              None
+            }
+          }
+        });
+      }
+    }
+
     Ok(Self {
       genesis_block_coinbase_txid: genesis_block_coinbase_transaction.txid(),
       client,
       database,
-      pg_pool: Mutex::new(None),
+      pg_pool,
       durability,
       first_inscription_height: options.first_inscription_height(),
       genesis_block_coinbase_transaction,
@@ -412,11 +439,6 @@ impl Index {
       started: Utc::now(),
       unrecoverably_reorged: AtomicBool::new(false),
     })
-  }
-
-  pub fn set_pg_pool(&self, pool: PgPool) {
-    let mut pg_pool_lock = self.pg_pool.lock().unwrap();
-    *pg_pool_lock = Some(pool);
   }
 
   #[cfg(test)]

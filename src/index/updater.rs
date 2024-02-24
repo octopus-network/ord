@@ -57,8 +57,10 @@ impl<'index> Updater<'_> {
     let mut wtx = self.index.begin_write()?;
     let starting_height = u32::try_from(self.index.client.get_block_count()?).unwrap() + 1;
 
-    if self.height == 0 {
-      self.height = self.index.options.first_rune_height() - 1;
+    let first_rune_height = self.index.options.first_rune_height();
+    log::info!("first_rune_height: {}", first_rune_height);
+    if first_rune_height > 0 && self.height == 0 {
+      self.height = first_rune_height - 1;
     }
 
     wtx
@@ -609,6 +611,7 @@ impl<'index> Updater<'_> {
         timestamp: block.header.time,
         transaction_id_to_rune: &mut transaction_id_to_rune,
         updates: HashMap::new(),
+        index: self.index,
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
