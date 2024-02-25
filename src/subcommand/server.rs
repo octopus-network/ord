@@ -183,8 +183,14 @@ pub struct Server {
 }
 
 impl Server {
-  pub fn run(self, options: Options, index: Arc<Index>, handle: Handle) -> SubcommandResult {
-    Runtime::new()?.block_on(async {
+  pub fn run(
+    self,
+    options: Options,
+    runtime: Arc<Runtime>,
+    index: Arc<Index>,
+    handle: Handle,
+  ) -> SubcommandResult {
+    runtime.block_on(async {
       let index_clone = index.clone();
 
       let index_thread = thread::spawn(move || loop {
@@ -1809,12 +1815,17 @@ mod tests {
       ));
 
       let index = Arc::new(Index::open(&options).unwrap());
+      let runtime = Arc::new(Runtime::new().unwrap());
       let ord_server_handle = Handle::new();
 
       {
         let index = index.clone();
         let ord_server_handle = ord_server_handle.clone();
-        thread::spawn(|| server.run(options, index, ord_server_handle).unwrap());
+        thread::spawn(|| {
+          server
+            .run(options, runtime, index, ord_server_handle)
+            .unwrap()
+        });
       }
 
       while index.statistic(crate::index::Statistic::Commits) == 0 {

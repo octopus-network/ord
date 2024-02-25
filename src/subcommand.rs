@@ -60,9 +60,10 @@ impl Subcommand {
       Self::Runes => runes::run(options),
       Self::Server(server) => {
         let index = Arc::new(Index::open(&options)?);
+        let runtime = Arc::new(Runtime::new()?);
         let handle = axum_server::Handle::new();
         LISTENERS.lock().unwrap().push(handle.clone());
-        server.run(options, index, handle)
+        server.run(options, runtime, index, handle)
       }
       Self::Subsidy(subsidy) => subsidy.run(),
       Self::Supply => supply::run(),
