@@ -23,7 +23,7 @@ use {
     ReadOnlyTable, ReadableMultimapTable, ReadableTable, RepairSession, StorageError, Table,
     TableDefinition, TableHandle, TableStats, WriteTransaction,
   },
-  sqlx::postgres::{PgPool, PgPoolOptions, PgRow},
+  sqlx::postgres::{PgPool, PgPoolOptions},
   std::env,
   std::{
     collections::HashMap,

@@ -1,7 +1,10 @@
 use {
   super::*,
-  crate::index::entry::TxInput,
-  crate::runes::{varint, Edict, Runestone, CLAIM_BIT},
+  crate::{
+    index::entry::{TxInput, TxOutput},
+    runes::{varint, Edict, Runestone, CLAIM_BIT},
+  },
+  sqlx::{Pool, Postgres},
 };
 
 fn claim(id: u128) -> Option<u128> {
@@ -48,13 +51,15 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     // A mapping of rune ID to un-allocated balance of that rune
     let mut unallocated: HashMap<u128, u128> = HashMap::new();
     let mut tx_inputs: Vec<TxInput> = Vec::new();
+    let mut input_n = 0;
+    let mut tx_outputs: Vec<TxOutput> = Vec::new();
+    let mut output_n = 0;
 
     // Increment unallocated runes with the runes in this transaction's inputs
     for input in &tx.input {
-      let mut n = 0;
-      let tx_input = TxInput::from_txin(input, &txid, n);
+      let tx_input = TxInput::from_txin(input, &txid, input_n);
       tx_inputs.push(tx_input);
-      n += 1;
+      input_n += 1;
 
       if let Some(guard) = self
         .outpoint_to_balances
@@ -71,8 +76,11 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         }
       }
     }
-    if tx_inputs.len() > 0 {
-      self.pg_insert_tx_inputs(tx_inputs)?;
+
+    for output in &tx.output {
+      let tx_output = TxOutput::from_txout(output, &txid, output_n);
+      tx_outputs.push(tx_output);
+      output_n += 1;
     }
 
     let burn = runestone
@@ -419,44 +427,87 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         .burned += amount;
     }
 
+    if let Some(pg_pool) = &self.index.pg_pool {
+      Runtime::new()?.block_on(async {
+        if tx_inputs.len() > 0 {
+          let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
+        }
+        if tx_outputs.len() > 0 {
+          let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
+        }
+      });
+    }
     Ok(())
   }
 
   // PostgreSQL
-  pub(crate) fn pg_insert_tx_inputs(&self, tx_inputs: Vec<TxInput>) -> Result<()> {
-    if let Some(pg_pool) = &self.index.pg_pool {
-      Runtime::new()?.block_on(async {
-        for tx_input in tx_inputs {
-          let result = sqlx::query!(
-            r#"
+  pub(crate) async fn pg_insert_tx_inputs(
+    &self,
+    pg_pool: &Pool<Postgres>,
+    tx_inputs: Vec<TxInput>,
+  ) -> Result<()> {
+    for tx_input in tx_inputs {
+      let result = sqlx::query!(
+        r#"
             INSERT INTO public.tx_inputs (
                 tx_id, n, prevout_tx_id, prevout, script_sig, sequence, witness
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (tx_id, n) DO NOTHING
             "#,
-            tx_input.tx_id,
-            tx_input.n,
-            tx_input.prevout_tx_id,
-            tx_input.prevout,
-            tx_input.script_sig,
-            tx_input.sequence,
-            tx_input.witness
-          )
-          .execute(pg_pool)
-          .await;
+        tx_input.tx_id,
+        tx_input.n,
+        tx_input.prevout_tx_id,
+        tx_input.prevout,
+        tx_input.script_sig,
+        tx_input.sequence,
+        tx_input.witness
+      )
+      .execute(pg_pool)
+      .await;
 
-          match result {
-            Ok(record) => {
-              log::info!("INSERT INTO public.tx_inputs: {}", tx_input.tx_id);
-            }
-            Err(error) => {
-              log::error!("An error occurred INSERT INTO public.tx_inputs: {}", error);
-            }
-          }
+      match result {
+        Ok(_) => {
+          log::info!("INSERT INTO public.tx_inputs: {}", tx_input.tx_id);
         }
-      })
+        Err(error) => {
+          log::error!("An error occurred INSERT INTO public.tx_inputs: {}", error);
+        }
+      }
     }
 
+    Ok(())
+  }
+
+  pub(crate) async fn pg_insert_tx_outputs(
+    &self,
+    pg_pool: &Pool<Postgres>,
+    tx_outputs: Vec<TxOutput>,
+  ) -> Result<()> {
+    for tx_output in tx_outputs {
+      let result = sqlx::query!(
+        r#"
+            INSERT INTO tx_outputs (tx_id, n, value, script_pubkey, spent)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (tx_id, n) DO NOTHING
+            "#,
+        tx_output.tx_id,
+        tx_output.n,
+        tx_output.value,
+        tx_output.script_pubkey,
+        tx_output.spent,
+      )
+      .execute(pg_pool)
+      .await;
+
+      match result {
+        Ok(_) => {
+          log::info!("INSERT INTO public.tx_outputs: {}", tx_output.tx_id);
+        }
+        Err(error) => {
+          log::error!("An error occurred INSERT INTO public.tx_outputs: {}", error);
+        }
+      }
+    }
     Ok(())
   }
 }

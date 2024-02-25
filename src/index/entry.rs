@@ -400,7 +400,7 @@ pub(crate) struct TxInput {
   pub(crate) prevout_tx_id: Option<String>,
   pub(crate) prevout: i32,
   pub(crate) script_sig: Vec<u8>,
-  pub(crate) sequence: i32,
+  pub(crate) sequence: Option<String>,
   pub(crate) witness: Option<Vec<u8>>,
 }
 
@@ -409,7 +409,7 @@ impl TxInput {
     let prevout_tx_id = Some(txin.previous_output.txid.to_string());
     let prevout = txin.previous_output.vout as i32;
     let script_sig = txin.script_sig.to_bytes();
-    let sequence = txin.sequence.to_consensus_u32() as i32;
+    let sequence = Some(txin.sequence.to_string());
     let witness = None;
     // Serialize witness data if present
     // let witness = if !txin.witness.is_empty() {
@@ -432,6 +432,27 @@ impl TxInput {
       script_sig,
       sequence,
       witness,
+    }
+  }
+}
+
+#[derive(Serialize, Deserialize, FromRow)]
+pub(crate) struct TxOutput {
+  pub(crate) tx_id: String,
+  pub(crate) n: i32,
+  pub(crate) value: i64,
+  pub(crate) script_pubkey: Vec<u8>,
+  pub(crate) spent: bool,
+}
+
+impl TxOutput {
+  pub fn from_txout(txout: &TxOut, tx_id: &Txid, n: i32) -> TxOutput {
+    TxOutput {
+      tx_id: tx_id.to_string(),
+      n,
+      value: txout.value as i64,
+      script_pubkey: txout.script_pubkey.clone().into_bytes(),
+      spent: false,
     }
   }
 }
