@@ -59,8 +59,20 @@ impl Subcommand {
       Self::Parse(parse) => parse.run(),
       Self::Runes => runes::run(options),
       Self::Server(server) => {
-        let index = Arc::new(Index::open(&options)?);
         let runtime = Arc::new(Runtime::new()?);
+        let mut index = Index::open(&options)?;
+        if options.index_runes {
+          let runtime_clone = Arc::clone(&runtime);
+          runtime.block_on(async {
+            index
+              .init_pg_pool(&runtime_clone)
+              .await
+              .expect("Failed to initialize PgPool");
+          });
+          index.set_runtime(runtime_clone);
+        }
+
+        let index = Arc::new(index);
         let handle = axum_server::Handle::new();
         LISTENERS.lock().unwrap().push(handle.clone());
         server.run(options, runtime, index, handle)

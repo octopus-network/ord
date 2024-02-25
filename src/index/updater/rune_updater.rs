@@ -5,6 +5,7 @@ use {
     runes::{varint, Edict, Runestone, CLAIM_BIT},
   },
   sqlx::{Pool, Postgres},
+  std::ops::Deref,
 };
 
 fn claim(id: u128) -> Option<u128> {
@@ -428,14 +429,16 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     }
 
     if let Some(pg_pool) = &self.index.pg_pool {
-      Runtime::new()?.block_on(async {
-        if tx_inputs.len() > 0 {
-          let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
-        }
-        if tx_outputs.len() > 0 {
-          let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
-        }
-      });
+      if let Some(runtime) = &self.index.runtime {
+        runtime.block_on(async {
+          if tx_inputs.len() > 0 {
+            let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
+          }
+          if tx_outputs.len() > 0 {
+            let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
+          }
+        });
+      }
     }
     Ok(())
   }

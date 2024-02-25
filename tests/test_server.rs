@@ -4,6 +4,7 @@ use {
   bitcoincore_rpc::{Auth, Client, RpcApi},
   ord::{parse_ord_server_args, Index},
   reqwest::blocking::Response,
+  tokio::runtime::Runtime,
 };
 
 pub(crate) struct TestServer {
@@ -61,9 +62,14 @@ impl TestServer {
     let ord_server_handle = Handle::new();
 
     {
+      let runtime = Arc::new(Runtime::new().unwrap());
       let index = index.clone();
       let ord_server_handle = ord_server_handle.clone();
-      thread::spawn(|| server.run(options, index, ord_server_handle).unwrap());
+      thread::spawn(|| {
+        server
+          .run(options, runtime, index, ord_server_handle)
+          .unwrap()
+      });
     }
 
     for i in 0.. {
