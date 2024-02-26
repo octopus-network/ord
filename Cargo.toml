@@ -24,6 +24,7 @@ axum = { version = "0.6.1", features = ["headers", "http2"] }
 axum-server = "0.5.0"
 base64 = "0.21.0"
 bech32 = "0.9.1"
+bigdecimal = "0.3"
 bip39 = "2.0.0"
 bitcoin = { version = "0.30.1", features = ["rand"] }
 boilerplate = { version = "1.0.0", features = ["axum"] }
@@ -68,7 +69,7 @@ tokio-util = {version = "0.7.3", features = ["compat"] }
 tower-http = { version = "0.4.0", features = ["compression-br", "compression-gzip", "cors", "set-header"] }
 
 # tokio + rustls
-sqlx = { version = "0.7", features = [ "runtime-tokio", "tls-rustls", "any", "postgres", "chrono"] }
+sqlx = { version = "0.7", features = [ "runtime-tokio", "tls-rustls", "any", "postgres", "chrono", "bigdecimal"] }
 
 [dev-dependencies]
 criterion = "0.5.1"

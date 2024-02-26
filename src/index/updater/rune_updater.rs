@@ -4,8 +4,8 @@ use {
     index::entry::{TxInput, TxOutput},
     runes::{varint, Edict, Runestone, CLAIM_BIT},
   },
+  bigdecimal::{BigDecimal, FromPrimitive},
   sqlx::{Pool, Postgres},
-  std::ops::Deref,
 };
 
 fn claim(id: u128) -> Option<u128> {
@@ -115,6 +115,7 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
             None
           } else {
             let rune = if let Some(rune) = etching.rune {
+              log::info!("TX has runestone etching: {}", txid);
               rune
             } else {
               let reserved_runes = self
@@ -346,6 +347,50 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
             .insert(sequence_number.value(), id.store())?;
         }
       }
+
+      if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
+        runtime.block_on(async {
+          if let Some(Allocation {
+            balance,
+            divisibility,
+            id,
+            mint,
+            rune,
+            spacers,
+            symbol,
+          }) = allocation
+          {
+            let rune_id = RuneId::try_from(id).unwrap();
+            let rune_id_u128 = u128::from(rune_id);
+            let hex_rune_id = format!("{:x}", rune_id_u128);
+            log::info!("pg_pool create rune_entry: {}", hex_rune_id.clone());
+            let rune_entry = RuneEntry {
+              burned: 0,
+              divisibility,
+              etching: txid,
+              mints: 0,
+              number: 0, // TODO:
+              mint: mint.and_then(|mint| (!burn).then_some(mint)),
+              rune,
+              spacers,
+              supply: if let Some(mint) = mint {
+                if mint.end == Some(self.height) {
+                  0
+                } else {
+                  mint.limit.unwrap_or(runes::MAX_LIMIT)
+                }
+              } else {
+                u128::max_value()
+              } - balance,
+              symbol,
+              timestamp: self.timestamp,
+            };
+            let _ = self
+              .pg_insert_runes(pg_pool, &hex_rune_id, rune_entry)
+              .await;
+          }
+        });
+      }
     }
 
     let mut burned: HashMap<u128, u128> = HashMap::new();
@@ -428,17 +473,15 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         .burned += amount;
     }
 
-    if let Some(pg_pool) = &self.index.pg_pool {
-      if let Some(runtime) = &self.index.runtime {
-        runtime.block_on(async {
-          if tx_inputs.len() > 0 {
-            let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
-          }
-          if tx_outputs.len() > 0 {
-            let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
-          }
-        });
-      }
+    if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
+      runtime.block_on(async {
+        if !tx_inputs.is_empty() {
+          let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
+        }
+        if !tx_outputs.is_empty() {
+          let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
+        }
+      });
     }
     Ok(())
   }
@@ -511,6 +554,77 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         }
       }
     }
+    Ok(())
+  }
+
+  pub(crate) async fn pg_insert_runes(
+    &self,
+    pg_pool: &Pool<Postgres>,
+    hex_rune_id: &str,
+    rune_entry: RuneEntry,
+  ) -> Result<()> {
+    let mut mint_deadline: i32 = 0;
+    let mut mint_limit = BigDecimal::from(0);
+    let mut mint_term: i32 = 0;
+    match rune_entry.mint {
+      Some(mint_entry) => {
+        if let Some(deadline_value) = mint_entry.deadline {
+          mint_deadline = deadline_value as i32;
+        } else if let Some(end_value) = mint_entry.end {
+          mint_term = end_value as i32;
+        } else if let Some(limit_value) = mint_entry.limit {
+          mint_limit = BigDecimal::from_i128(limit_value as i128).unwrap_or(BigDecimal::from(0));
+        }
+      }
+      None => {}
+    }
+
+    let open_etching: bool = match rune_entry.mint {
+      Some(mint_entry) => {
+        if mint_entry.deadline.is_some() || mint_entry.end.is_some() {
+          true
+        } else {
+          false
+        }
+      }
+      None => false,
+    };
+
+    let rune_timestamp = Utc.timestamp_opt(rune_entry.timestamp as i64, 0).unwrap();
+
+    let result = sqlx::query!(
+      r#"
+          INSERT INTO public.runes
+          (rune_id, rune, symbol, divisibility, spacers, open_etching, mint_deadline, mint_limit, mint_term, rune_timestamp, etching_txid, burned, mints, supply)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          "#,
+      hex_rune_id,
+      rune_entry.rune.to_string(),
+      rune_entry.symbol.map(|c| c as i8),
+      rune_entry.divisibility as i16,
+      rune_entry.spacers.to_string(),
+      open_etching,
+      mint_deadline,
+      mint_limit,
+      mint_term,
+      rune_timestamp,
+      rune_entry.etching.to_string(),
+      BigDecimal::from_i128(rune_entry.burned as i128).unwrap_or(BigDecimal::from(0)),
+      BigDecimal::from_i128(rune_entry.mints as i128).unwrap_or(BigDecimal::from(0)),
+      BigDecimal::from_i128(rune_entry.supply as i128).unwrap_or(BigDecimal::from(0)),
+    )
+    .execute(pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::info!("INSERT INTO public.runes: {}", rune_entry.etching);
+      }
+      Err(error) => {
+        log::error!("An error occurred INSERT INTO public.runes: {}", error);
+      }
+    }
+
     Ok(())
   }
 }
