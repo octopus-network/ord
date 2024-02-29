@@ -1,4 +1,8 @@
-use {super::*, sqlx::FromRow};
+use {
+  super::*,
+  bigdecimal::{BigDecimal, FromPrimitive},
+  sqlx::FromRow,
+};
 
 pub(crate) trait Entry: Sized {
   type Value;
@@ -393,7 +397,7 @@ impl Entry for Txid {
   }
 }
 
-#[derive(Serialize, Deserialize, FromRow)]
+#[derive(Clone, Serialize, Deserialize, FromRow)]
 pub(crate) struct TxInput {
   pub(crate) tx_id: String,
   pub(crate) n: i32,
@@ -436,25 +440,49 @@ impl TxInput {
   }
 }
 
-#[derive(Serialize, Deserialize, FromRow)]
+#[derive(Clone, Serialize, Deserialize, FromRow)]
 pub(crate) struct TxOutput {
   pub(crate) tx_id: String,
-  pub(crate) n: i32,
+  pub(crate) vout: i32,
   pub(crate) value: i64,
   pub(crate) script_pubkey: Vec<u8>,
-  pub(crate) spent: bool,
+  pub(crate) is_op_return: bool,
 }
 
 impl TxOutput {
-  pub fn from_txout(txout: &TxOut, tx_id: &Txid, n: i32) -> TxOutput {
+  pub fn from_txout(txout: &TxOut, tx_id: &Txid, vout: i32) -> TxOutput {
+    let is_op_return = if txout.script_pubkey.is_op_return() {
+      true
+    } else {
+      false
+    };
     TxOutput {
       tx_id: tx_id.to_string(),
-      n,
+      vout,
       value: txout.value as i64,
       script_pubkey: txout.script_pubkey.clone().into_bytes(),
-      spent: false,
+      is_op_return,
     }
   }
+}
+
+#[derive(Clone, Serialize, Deserialize, FromRow)]
+pub(crate) struct RuneBalance {
+  pub(crate) rune_id: String,
+  pub(crate) address: String,
+  pub(crate) rune_amount: Option<BigDecimal>,
+}
+
+#[derive(Clone, Serialize, Deserialize, FromRow)]
+pub(crate) struct OutpointBalance {
+  pub(crate) tx_id: String,
+  pub(crate) vout: i32,
+  pub(crate) address: String,
+  pub(crate) rune_id: Option<String>,
+  pub(crate) rune_amount: Option<BigDecimal>,
+  pub(crate) burn: bool,
+  pub(crate) spent: bool,
+  pub(crate) value: i64,
 }
 
 #[cfg(test)]
