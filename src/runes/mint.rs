@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Default, Serialize, Debug, PartialEq, Copy, Clone)]
+#[derive(Default, Deserialize, Serialize, Debug, PartialEq, Copy, Clone)]
 pub struct Mint {
   pub deadline: Option<u32>,
   pub limit: Option<u128>,

@@ -1,8 +1,4 @@
-use {
-  super::*,
-  bigdecimal::{BigDecimal, FromPrimitive},
-  sqlx::FromRow,
-};
+use {super::*, bigdecimal::BigDecimal, sqlx::FromRow};
 
 pub(crate) trait Entry: Sized {
   type Value;
@@ -447,6 +443,7 @@ pub(crate) struct TxOutput {
   pub(crate) value: i64,
   pub(crate) script_pubkey: Vec<u8>,
   pub(crate) is_op_return: bool,
+  pub(crate) op_return_data: Option<serde_json::Value>,
 }
 
 impl TxOutput {
@@ -462,6 +459,7 @@ impl TxOutput {
       value: txout.value as i64,
       script_pubkey: txout.script_pubkey.clone().into_bytes(),
       is_op_return,
+      op_return_data: None,
     }
   }
 }

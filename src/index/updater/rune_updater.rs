@@ -5,6 +5,7 @@ use {
     runes::{varint, Edict, Runestone, CLAIM_BIT},
   },
   bigdecimal::{BigDecimal, FromPrimitive, Zero},
+  sqlx::types::Json,
   sqlx::{Pool, Postgres},
 };
 
@@ -132,10 +133,12 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
       // handle runes related outputs and outpoits
       let mut tx_outpoints: Vec<OutpointBalance> = Vec::new();
       for (output_n, txout) in tx.output.iter().enumerate() {
-        let tx_output = TxOutput::from_txout(txout, &txid, output_n as i32);
-        tx_outputs.push(tx_output.clone());
+        let mut tx_output = TxOutput::from_txout(txout, &txid, output_n as i32);
 
-        if !tx_output.is_op_return {
+        if tx_output.is_op_return {
+          let json_value = serde_json::to_value(runestone.clone()).ok();
+          tx_output.op_return_data = json_value;
+        } else {
           let tx_outpoit = OutpointBalance {
             tx_id: txid.to_string().clone(),
             vout: output_n as i32,
@@ -148,6 +151,7 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
           };
           tx_outpoints.push(tx_outpoit);
         }
+        tx_outputs.push(tx_output.clone());
       }
 
       // Determine if this runestone contains a valid issuance
@@ -629,8 +633,8 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     for tx_output in tx_outputs {
       let result = sqlx::query!(
         r#"
-          INSERT INTO tx_outputs (tx_id, vout, value, script_pubkey, is_op_return)
-          VALUES ($1, $2, $3, $4, $5)
+          INSERT INTO tx_outputs (tx_id, vout, value, script_pubkey, is_op_return, op_return_data)
+          VALUES ($1, $2, $3, $4, $5, $6)
           ON CONFLICT (tx_id, vout) DO NOTHING
         "#,
         tx_output.tx_id,
@@ -638,6 +642,7 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         tx_output.value,
         tx_output.script_pubkey,
         tx_output.is_op_return,
+        tx_output.op_return_data,
       )
       .execute(pg_pool)
       .await;
