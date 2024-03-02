@@ -5,7 +5,6 @@ use {
     runes::{varint, Edict, Runestone, CLAIM_BIT},
   },
   bigdecimal::{BigDecimal, FromPrimitive, Zero},
-  sqlx::types::Json,
   sqlx::{Pool, Postgres},
 };
 
@@ -256,11 +255,11 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         for Edict { id, amount, output } in runestone.edicts {
           let hex_rune_id = if id == 0 {
             match allocation.as_mut() {
-              Some(Allocation { id, .. }) => self.get_hex_rune_id(*id),
+              Some(Allocation { id, .. }) => format!("{:x}", *id),
               None => continue,
             }
           } else {
-            self.get_hex_rune_id(id)
+            format!("{:x}", id)
           };
 
           // update outpoint_balances with rune info
@@ -389,7 +388,6 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         symbol,
       }) = allocation
       {
-        etching_hex_rune_id = self.get_hex_rune_id(id);
         let id = RuneId::try_from(id).unwrap();
         self.rune_to_id.insert(rune.0, id.store())?;
         self.transaction_id_to_rune.insert(&txid.store(), rune.0)?;
@@ -435,6 +433,8 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
             .insert(sequence_number.value(), id.store())?;
         }
 
+        let rune_id_u128 = u128::from(id);
+        etching_hex_rune_id = format!("{:x}", rune_id_u128);
         rune_entry = RuneEntry {
           burned: 0,
           divisibility,
@@ -979,12 +979,6 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
       }
     }
     Ok(())
-  }
-
-  fn get_hex_rune_id(&self, id: u128) -> String {
-    let rune_id = RuneId::try_from(id).unwrap();
-    let rune_id_u128 = u128::from(rune_id);
-    format!("{:x}", rune_id_u128)
   }
 
   fn get_address_from_script_pubkey(&self, script_pubkey: Vec<u8>) -> String {
