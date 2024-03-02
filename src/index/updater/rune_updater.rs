@@ -58,7 +58,9 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     let mut add_rune_balances: Vec<RuneBalance> = Vec::new();
     // (rune_id, address) -> rune_amount
     let mut rune_balance_map: HashMap<(String, String), BigDecimal> = HashMap::new();
-
+    let mut is_etching_tx = false;
+    let mut etching_hex_rune_id = String::new();
+    let mut rune_entry = RuneEntry::default();
     // Increment unallocated runes with the runes in this transaction's inputs
     for input in &tx.input {
       if let Some(guard) = self
@@ -164,6 +166,7 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
             None
           } else {
             let rune = if let Some(rune) = etching.rune {
+              is_etching_tx = true;
               rune
             } else {
               let reserved_runes = self
@@ -248,12 +251,9 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
 
         for Edict { id, amount, output } in runestone.edicts {
           let hex_rune_id = if id == 0 {
-            // this edict allocates new issuance runes
-            if let (Some(_), Some(alloc)) = (runestone.etching, &allocation) {
-              self.get_hex_rune_id(alloc.id)
-            } else {
-              log::error!("Exception etching");
-              String::new()
+            match allocation.as_mut() {
+              Some(Allocation { id, .. }) => self.get_hex_rune_id(*id),
+              None => continue,
             }
           } else {
             self.get_hex_rune_id(id)
@@ -385,6 +385,7 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         symbol,
       }) = allocation
       {
+        etching_hex_rune_id = self.get_hex_rune_id(id);
         let id = RuneId::try_from(id).unwrap();
         self.rune_to_id.insert(rune.0, id.store())?;
         self.transaction_id_to_rune.insert(&txid.store(), rune.0)?;
@@ -429,48 +430,28 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
             .sequence_number_to_rune_id
             .insert(sequence_number.value(), id.store())?;
         }
-      }
 
-      if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
-        runtime.block_on(async {
-          if let Some(Allocation {
-            balance,
-            divisibility,
-            id,
-            mint,
-            rune,
-            spacers,
-            symbol,
-          }) = allocation
-          {
-            let hex_rune_id = self.get_hex_rune_id(id);
-            log::info!("pg_pool create rune_entry: {}", hex_rune_id.clone());
-            let rune_entry = RuneEntry {
-              burned: 0,
-              divisibility,
-              etching: txid,
-              mints: 0,
-              number: 0, // TODO:
-              mint: mint.and_then(|mint| (!burn).then_some(mint)),
-              rune,
-              spacers,
-              supply: if let Some(mint) = mint {
-                if mint.end == Some(self.height) {
-                  0
-                } else {
-                  mint.limit.unwrap_or(runes::MAX_LIMIT)
-                }
-              } else {
-                u128::max_value()
-              } - balance,
-              symbol,
-              timestamp: self.timestamp,
-            };
-            let _ = self
-              .pg_insert_runes(pg_pool, &hex_rune_id, rune_entry)
-              .await;
-          }
-        });
+        rune_entry = RuneEntry {
+          burned: 0,
+          divisibility,
+          etching: txid,
+          mints: 0,
+          number,
+          mint: mint.and_then(|mint| (!burn).then_some(mint)),
+          rune,
+          spacers,
+          supply: if let Some(mint) = mint {
+            if mint.end == Some(self.height) {
+              0
+            } else {
+              mint.limit.unwrap_or(runes::MAX_LIMIT)
+            }
+          } else {
+            u128::max_value()
+          } - balance,
+          symbol,
+          timestamp: self.timestamp,
+        };
       }
     }
 
@@ -556,6 +537,11 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
 
     if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
       runtime.block_on(async {
+        if is_etching_tx {
+          let _ = self
+            .pg_insert_runes(pg_pool, &etching_hex_rune_id, rune_entry)
+            .await;
+        }
         if !tx_outputs.is_empty() {
           let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
         }
@@ -737,45 +723,6 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     }
 
     Ok(())
-  }
-
-  pub(crate) async fn pg_select_tx_output(
-    &self,
-    pg_pool: &Pool<Postgres>,
-    txid: &str,
-    vout: i32,
-  ) -> Result<Option<TxOutput>> {
-    let result = sqlx::query!(
-      r#"
-        SELECT * FROM public.tx_outputs
-        WHERE tx_id = $1 AND vout = $2
-        "#,
-      txid,
-      vout,
-    )
-    .fetch_one(pg_pool)
-    .await;
-
-    match result {
-      Ok(row) => {
-        log::info!(
-          "SELECT public.tx_outputs with txid and vout: {},{}",
-          row.tx_id,
-          row.vout,
-        );
-        Ok(Some(TxOutput {
-          tx_id: row.tx_id,
-          vout: row.vout,
-          value: row.value,
-          script_pubkey: row.script_pubkey,
-          is_op_return: row.is_op_return,
-        }))
-      }
-      Err(error) => {
-        log::error!("An error occurred SELECT public.tx_outputs: {}", error);
-        Ok(None)
-      }
-    }
   }
 
   pub(crate) async fn pg_select_outpoint_balances(
