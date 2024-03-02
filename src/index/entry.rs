@@ -470,7 +470,7 @@ impl TxOutput {
 pub(crate) struct RuneBalance {
   pub(crate) rune_id: String,
   pub(crate) address: String,
-  pub(crate) rune_amount: Option<BigDecimal>,
+  pub(crate) rune_amount: BigDecimal,
 }
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
@@ -478,8 +478,8 @@ pub(crate) struct OutpointBalance {
   pub(crate) tx_id: String,
   pub(crate) vout: i32,
   pub(crate) address: String,
-  pub(crate) rune_id: Option<String>,
-  pub(crate) rune_amount: Option<BigDecimal>,
+  pub(crate) rune_id: String,
+  pub(crate) rune_amount: BigDecimal,
   pub(crate) burn: bool,
   pub(crate) spent: bool,
   pub(crate) value: i64,

@@ -4,7 +4,7 @@ use {
     index::entry::{OutpointBalance, RuneBalance, TxInput, TxOutput},
     runes::{varint, Edict, Runestone, CLAIM_BIT},
   },
-  bigdecimal::{BigDecimal, FromPrimitive},
+  bigdecimal::{BigDecimal, FromPrimitive, Zero},
   sqlx::{Pool, Postgres},
 };
 
@@ -54,7 +54,10 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     let mut tx_inputs: Vec<TxInput> = Vec::new();
     let mut tx_outputs: Vec<TxOutput> = Vec::new();
     let mut outpoints: Vec<OutpointBalance> = Vec::new();
-    let mut tx_runes: Vec<RuneBalance> = Vec::new();
+    let mut update_rune_balances: Vec<RuneBalance> = Vec::new();
+    let mut add_rune_balances: Vec<RuneBalance> = Vec::new();
+    // (rune_id, address) -> rune_amount
+    let mut rune_balance_map: HashMap<(String, String), BigDecimal> = HashMap::new();
 
     // Increment unallocated runes with the runes in this transaction's inputs
     for input in &tx.input {
@@ -105,9 +108,15 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
                     input.prevout,
                   )
                   .await;
-                if let Ok(Some(mut item)) = outpoint {
-                  item.burn = true;
-                  update_outpoints.push(item);
+
+                if let Ok(Some(mut out_item)) = outpoint {
+                  out_item.spent = true;
+                  update_outpoints.push(out_item.clone());
+
+                  let key = (out_item.rune_id.clone(), out_item.address.clone());
+                  // neg rune_amount
+                  let rune_amount = -out_item.rune_amount.clone();
+                  rune_balance_map.insert(key, rune_amount);
                 }
               }
 
@@ -129,8 +138,8 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
             tx_id: txid.to_string().clone(),
             vout: output_n as i32,
             address: self.get_address_from_script_pubkey(tx_output.script_pubkey.clone()),
-            rune_id: None,
-            rune_amount: None,
+            rune_id: "".to_string(),
+            rune_amount: BigDecimal::zero(),
             burn,
             spent: false,
             value: txout.value as i64,
@@ -257,15 +266,19 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
                 tx_id: tx_outpoint.tx_id.clone(),
                 vout: tx_outpoint.vout,
                 address: tx_outpoint.address.clone(),
-                rune_id: Some(hex_rune_id.clone()),
-                rune_amount: Some(
-                  BigDecimal::from_i128(amount as i128).unwrap_or(BigDecimal::from(0)),
-                ),
+                rune_id: hex_rune_id.clone(),
+                rune_amount: BigDecimal::from_i128(amount as i128).unwrap_or(BigDecimal::from(0)),
                 burn: tx_outpoint.burn,
                 spent: tx_outpoint.spent,
                 value: tx_outpoint.value,
               };
-              outpoints.push(outpoint);
+              outpoints.push(outpoint.clone());
+
+              let key = (outpoint.rune_id.clone(), outpoint.address.clone());
+              rune_balance_map
+                .entry(key)
+                .and_modify(|amount| *amount += &outpoint.rune_amount)
+                .or_insert_with(|| outpoint.rune_amount.clone());
             }
           }
 
@@ -552,6 +565,33 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         if !tx_inputs.is_empty() {
           let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
         }
+
+        for (key, amount) in rune_balance_map.iter() {
+          let rune = self.pg_select_rune_balances(pg_pool, &key.0, &key.1).await;
+          if let Ok(Some(db_rune)) = rune {
+            update_rune_balances.push(RuneBalance {
+              rune_id: db_rune.rune_id.clone(),
+              address: db_rune.address.clone(),
+              rune_amount: db_rune.rune_amount.clone() + amount,
+            });
+          } else {
+            add_rune_balances.push(RuneBalance {
+              rune_id: key.0.clone(),
+              address: key.1.clone(),
+              rune_amount: amount.clone(),
+            })
+          };
+        }
+        if !add_rune_balances.is_empty() {
+          let _ = self
+            .pg_insert_rune_balances(pg_pool, add_rune_balances)
+            .await;
+        }
+        if !update_rune_balances.is_empty() {
+          let _ = self
+            .pg_update_rune_balances(pg_pool, update_rune_balances)
+            .await;
+        }
       });
     }
     Ok(())
@@ -765,12 +805,12 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         Ok(Some(OutpointBalance {
           tx_id: row.tx_id,
           vout: row.vout,
-          address: row.address.unwrap(),
+          address: row.address,
           rune_id: row.rune_id,
           rune_amount: row.rune_amount,
-          burn: row.burn.unwrap(),
-          spent: row.spent.unwrap(),
-          value: row.value.unwrap(),
+          burn: row.burn.unwrap_or(false),
+          spent: row.spent.unwrap_or(false),
+          value: row.value,
         }))
       }
       Ok(None) => {
@@ -823,7 +863,9 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
       }
       Err(error) => {
         log::error!(
-          "An error occurred INSERT INTO public.runes_balances: {}",
+          "An error occurred SELECT public.runes_balances: {},{},{}",
+          rune_id,
+          address,
           error
         );
         Ok(None)
@@ -845,10 +887,7 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         "#,
         &balance.rune_id,
         &balance.address,
-        balance
-          .rune_amount
-          .clone()
-          .unwrap_or_else(|| BigDecimal::from(0)),
+        balance.rune_amount.clone(),
       )
       .execute(pool)
       .await;
@@ -862,7 +901,9 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         }
         Err(error) => {
           log::error!(
-            "An error occurred INSERT INTO public.runes_balances: {}",
+            "An error occurred INSERT INTO public.runes_balances: {},{},{}",
+            balance.rune_id.clone(),
+            balance.address.clone(),
             error
           );
         }
@@ -940,6 +981,46 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         Err(error) => {
           log::error!(
             "An error occurred UPDATE public.outpoint_balances: {}",
+            error
+          );
+        }
+      }
+    }
+    Ok(())
+  }
+
+  pub(crate) async fn pg_update_rune_balances(
+    &self,
+    pool: &PgPool,
+    rune_balances: Vec<RuneBalance>,
+  ) -> Result<()> {
+    for rune in rune_balances {
+      let result = sqlx::query!(
+        r#"UPDATE public.runes_balances
+          SET rune_amount = $1
+          WHERE rune_id = $2 AND address = $3
+         "#,
+        rune.rune_amount.clone(),
+        rune.rune_id.clone(),
+        rune.address.clone(),
+      )
+      .execute(pool)
+      .await;
+
+      match result {
+        Ok(_) => {
+          log::info!(
+            "UPDATE public.runes_balances: {},{},{}",
+            rune.rune_id.clone(),
+            rune.address.clone(),
+            rune.rune_amount.clone(),
+          );
+        }
+        Err(error) => {
+          log::error!(
+            "An error occurred UPDATE public.runes_balances: {},{},{}",
+            rune.rune_id.clone(),
+            rune.address.clone(),
             error
           );
         }
