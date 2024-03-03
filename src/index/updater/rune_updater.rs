@@ -48,7 +48,6 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx, 'index> {
 impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
   pub(super) fn index_runes(&mut self, index: usize, tx: &Transaction, txid: Txid) -> Result<()> {
     let runestone = Runestone::from_transaction(tx);
-
     // A mapping of rune ID to un-allocated balance of that rune
     let mut unallocated: HashMap<u128, u128> = HashMap::new();
     let mut tx_inputs: Vec<TxInput> = Vec::new();
@@ -58,9 +57,6 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     let mut add_rune_balances: Vec<RuneBalance> = Vec::new();
     // (rune_id, address) -> rune_amount
     let mut rune_balance_map: HashMap<(String, String), BigDecimal> = HashMap::new();
-    let mut is_etching_tx = false;
-    let mut etching_hex_rune_id = String::new();
-    let mut rune_entry = RuneEntry::default();
     // Increment unallocated runes with the runes in this transaction's inputs
     for input in &tx.input {
       if let Some(guard) = self
@@ -94,65 +90,6 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
     let mut allocated: Vec<HashMap<u128, u128>> = vec![HashMap::new(); tx.output.len()];
 
     if let Some(runestone) = runestone {
-      // handle runes related inputs
-      for (input_n, input) in tx.input.iter().enumerate() {
-        let tx_input = TxInput::from_txin(input, &txid, input_n as i32);
-        tx_inputs.push(tx_input.clone());
-        if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
-          runtime.block_on(async {
-            if !tx_inputs.is_empty() {
-              let mut update_outpoints: Vec<OutpointBalance> = Vec::new();
-              for input in &tx_inputs {
-                let outpoint = self
-                  .pg_select_outpoint_balances(
-                    pg_pool,
-                    input.prevout_tx_id.as_ref().unwrap(),
-                    input.prevout,
-                  )
-                  .await;
-
-                if let Ok(Some(mut out_item)) = outpoint {
-                  out_item.spent = true;
-                  update_outpoints.push(out_item.clone());
-
-                  let key = (out_item.rune_id.clone(), out_item.address.clone());
-                  // neg rune_amount
-                  let rune_amount = -out_item.rune_amount.clone();
-                  rune_balance_map.insert(key, rune_amount);
-                }
-              }
-
-              let _ = self
-                .pg_update_outpoint_balances(pg_pool, update_outpoints)
-                .await;
-            }
-          });
-        }
-      }
-      // handle runes related outputs and outpoits
-      let mut tx_outpoints: Vec<OutpointBalance> = Vec::new();
-      for (output_n, txout) in tx.output.iter().enumerate() {
-        let mut tx_output = TxOutput::from_txout(txout, &txid, output_n as i32);
-
-        if tx_output.is_op_return {
-          let json_value = serde_json::to_value(runestone.clone()).ok();
-          tx_output.op_return_data = json_value;
-        } else {
-          let tx_outpoit = OutpointBalance {
-            tx_id: txid.to_string().clone(),
-            vout: output_n as i32,
-            address: self.get_address_from_script_pubkey(tx_output.script_pubkey.clone()),
-            rune_id: "".to_string(),
-            rune_amount: BigDecimal::zero(),
-            burn,
-            spent: false,
-            value: txout.value as i64,
-          };
-          tx_outpoints.push(tx_outpoit);
-        }
-        tx_outputs.push(tx_output.clone());
-      }
-
       // Determine if this runestone contains a valid issuance
       let mut allocation = match runestone.etching {
         Some(etching) => {
@@ -169,7 +106,7 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
             None
           } else {
             let rune = if let Some(rune) = etching.rune {
-              is_etching_tx = true;
+              log::info!("runestone.etching rune: {}", rune.clone());
               rune
             } else {
               let reserved_runes = self
@@ -219,6 +156,17 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         None => None,
       };
 
+      // handle runes related outputs
+      for (output_n, txout) in tx.output.iter().enumerate() {
+        let mut tx_output = TxOutput::from_txout(txout, &txid, output_n as i32);
+
+        if tx_output.is_op_return {
+          let json_value = serde_json::to_value(runestone.clone()).ok();
+          tx_output.op_return_data = json_value;
+        }
+        tx_outputs.push(tx_output.clone());
+      }
+
       if !burn {
         let mut mintable: HashMap<u128, u128> = HashMap::new();
 
@@ -253,38 +201,6 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         let limits = mintable.clone();
 
         for Edict { id, amount, output } in runestone.edicts {
-          let hex_rune_id = if id == 0 {
-            match allocation.as_mut() {
-              Some(Allocation { id, .. }) => format!("{:x}", *id),
-              None => continue,
-            }
-          } else {
-            format!("{:x}", id)
-          };
-
-          // update outpoint_balances with rune info
-          for tx_outpoint in &tx_outpoints {
-            if tx_outpoint.vout == output as i32 {
-              let outpoint = OutpointBalance {
-                tx_id: tx_outpoint.tx_id.clone(),
-                vout: tx_outpoint.vout,
-                address: tx_outpoint.address.clone(),
-                rune_id: hex_rune_id.clone(),
-                rune_amount: BigDecimal::from_i128(amount as i128).unwrap_or(BigDecimal::from(0)),
-                burn: tx_outpoint.burn,
-                spent: tx_outpoint.spent,
-                value: tx_outpoint.value,
-              };
-              outpoints.push(outpoint.clone());
-
-              let key = (outpoint.rune_id.clone(), outpoint.address.clone());
-              rune_balance_map
-                .entry(key)
-                .and_modify(|amount| *amount += &outpoint.rune_amount)
-                .or_insert_with(|| outpoint.rune_amount.clone());
-            }
-          }
-
           let Ok(output) = usize::try_from(output) else {
             continue;
           };
@@ -362,6 +278,46 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
 
             allocate(balance, amount, output);
           }
+
+          log::info!("runestone.edicts edict.id: {}", id);
+          let hex_rune_id = if id == 0 {
+            match allocation.as_mut() {
+              Some(Allocation { id, .. }) => {
+                let edicting_rune_id = format!("{:x}", *id);
+                log::info!("runestone.edicts edicting_rune_id: {}", &edicting_rune_id);
+                edicting_rune_id
+              }
+              None => continue,
+            }
+          } else {
+            let edicts_rune_id = format!("{:x}", id);
+            log::info!("runestone.edicts edicts_rune_id: {}", &edicts_rune_id);
+            edicts_rune_id
+          };
+
+          // handle runes related outpoits
+          for (output_n, txout) in tx.output.iter().enumerate() {
+            if !txout.script_pubkey.is_op_return() && output_n == output {
+              let outpoint = OutpointBalance {
+                tx_id: txid.to_string().clone(),
+                vout: output as i32,
+                address: self
+                  .get_address_from_script_pubkey(txout.script_pubkey.clone().into_bytes()),
+                rune_id: hex_rune_id.clone(),
+                rune_amount: BigDecimal::from_i128(amount as i128).unwrap_or(BigDecimal::from(0)),
+                burn,
+                spent: false,
+                value: txout.value as i64,
+              };
+              outpoints.push(outpoint.clone());
+
+              let key = (outpoint.rune_id.clone(), outpoint.address.clone());
+              rune_balance_map
+                .entry(key)
+                .and_modify(|amount| *amount += &outpoint.rune_amount)
+                .or_insert_with(|| outpoint.rune_amount.clone());
+            }
+          }
         }
 
         // increment entries with minted runes
@@ -396,46 +352,9 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         self
           .statistic_to_count
           .insert(&Statistic::Runes.into(), self.runes)?;
-        self.id_to_entry.insert(
-          id.store(),
-          RuneEntry {
-            burned: 0,
-            divisibility,
-            etching: txid,
-            mints: 0,
-            number,
-            mint: mint.and_then(|mint| (!burn).then_some(mint)),
-            rune,
-            spacers,
-            supply: if let Some(mint) = mint {
-              if mint.end == Some(self.height) {
-                0
-              } else {
-                mint.limit.unwrap_or(runes::MAX_LIMIT)
-              }
-            } else {
-              u128::max_value()
-            } - balance,
-            symbol,
-            timestamp: self.timestamp,
-          }
-          .store(),
-        )?;
 
-        let inscription_id = InscriptionId { txid, index: 0 };
-
-        if let Some(sequence_number) = self
-          .inscription_id_to_sequence_number
-          .get(&inscription_id.store())?
-        {
-          self
-            .sequence_number_to_rune_id
-            .insert(sequence_number.value(), id.store())?;
-        }
-
-        let rune_id_u128 = u128::from(id);
-        etching_hex_rune_id = format!("{:x}", rune_id_u128);
-        rune_entry = RuneEntry {
+        let hex_rune_id = format!("{:x}", u128::from(id));
+        let rune_entry = RuneEntry {
           burned: 0,
           divisibility,
           etching: txid,
@@ -456,6 +375,103 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
           symbol,
           timestamp: self.timestamp,
         };
+        if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
+          runtime.block_on(async {
+            log::info!("pg_insert_runes: {}", &hex_rune_id);
+            let _ = self
+              .pg_insert_runes(pg_pool, &hex_rune_id, rune_entry.clone())
+              .await;
+          });
+        }
+        self.id_to_entry.insert(id.store(), rune_entry.store())?;
+
+        let inscription_id = InscriptionId { txid, index: 0 };
+
+        if let Some(sequence_number) = self
+          .inscription_id_to_sequence_number
+          .get(&inscription_id.store())?
+        {
+          self
+            .sequence_number_to_rune_id
+            .insert(sequence_number.value(), id.store())?;
+        }
+      }
+
+      // handle runes related inputs
+      for (input_n, input) in tx.input.iter().enumerate() {
+        let tx_input = TxInput::from_txin(input, &txid, input_n as i32);
+        tx_inputs.push(tx_input.clone());
+        if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
+          runtime.block_on(async {
+            if !tx_inputs.is_empty() {
+              let mut update_outpoints: Vec<OutpointBalance> = Vec::new();
+              for input in &tx_inputs {
+                let outpoint = self
+                  .pg_select_outpoint_balances(
+                    pg_pool,
+                    input.prevout_tx_id.as_ref().unwrap(),
+                    input.prevout,
+                  )
+                  .await;
+
+                if let Ok(Some(mut out_item)) = outpoint {
+                  out_item.spent = true;
+                  update_outpoints.push(out_item.clone());
+
+                  let key = (out_item.rune_id.clone(), out_item.address.clone());
+                  // neg rune_amount
+                  let rune_amount = -out_item.rune_amount.clone();
+                  rune_balance_map.insert(key, rune_amount);
+                }
+              }
+
+              let _ = self
+                .pg_update_outpoint_balances(pg_pool, update_outpoints)
+                .await;
+            }
+          });
+        }
+      }
+
+      if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
+        runtime.block_on(async {
+          if !tx_outputs.is_empty() {
+            let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
+          }
+          if !outpoints.is_empty() {
+            let _ = self.pg_insert_outpoint_balances(pg_pool, outpoints).await;
+          }
+          if !tx_inputs.is_empty() {
+            let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
+          }
+
+          for (key, amount) in rune_balance_map.iter() {
+            let rune = self.pg_select_rune_balances(pg_pool, &key.0, &key.1).await;
+            if let Ok(Some(db_rune)) = rune {
+              update_rune_balances.push(RuneBalance {
+                rune_id: db_rune.rune_id.clone(),
+                address: db_rune.address.clone(),
+                rune_amount: db_rune.rune_amount.clone() + amount,
+              });
+            } else {
+              add_rune_balances.push(RuneBalance {
+                rune_id: key.0.clone(),
+                address: key.1.clone(),
+                rune_amount: amount.clone(),
+              })
+            };
+          }
+          if !add_rune_balances.is_empty() {
+            let _ = self
+              .pg_insert_rune_balances(pg_pool, add_rune_balances)
+              .await;
+          }
+          if !update_rune_balances.is_empty() {
+            let _ = self
+              .pg_update_rune_balances(pg_pool, update_rune_balances)
+              .await;
+          }
+        });
       }
     }
 
@@ -539,51 +555,6 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
         .burned += amount;
     }
 
-    if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
-      runtime.block_on(async {
-        if is_etching_tx {
-          let _ = self
-            .pg_insert_runes(pg_pool, &etching_hex_rune_id, rune_entry)
-            .await;
-        }
-        if !tx_outputs.is_empty() {
-          let _ = self.pg_insert_tx_outputs(pg_pool, tx_outputs).await;
-        }
-        if !outpoints.is_empty() {
-          let _ = self.pg_insert_outpoint_balances(pg_pool, outpoints).await;
-        }
-        if !tx_inputs.is_empty() {
-          let _ = self.pg_insert_tx_inputs(pg_pool, tx_inputs).await;
-        }
-
-        for (key, amount) in rune_balance_map.iter() {
-          let rune = self.pg_select_rune_balances(pg_pool, &key.0, &key.1).await;
-          if let Ok(Some(db_rune)) = rune {
-            update_rune_balances.push(RuneBalance {
-              rune_id: db_rune.rune_id.clone(),
-              address: db_rune.address.clone(),
-              rune_amount: db_rune.rune_amount.clone() + amount,
-            });
-          } else {
-            add_rune_balances.push(RuneBalance {
-              rune_id: key.0.clone(),
-              address: key.1.clone(),
-              rune_amount: amount.clone(),
-            })
-          };
-        }
-        if !add_rune_balances.is_empty() {
-          let _ = self
-            .pg_insert_rune_balances(pg_pool, add_rune_balances)
-            .await;
-        }
-        if !update_rune_balances.is_empty() {
-          let _ = self
-            .pg_update_rune_balances(pg_pool, update_rune_balances)
-            .await;
-        }
-      });
-    }
     Ok(())
   }
 
@@ -720,10 +691,18 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
 
     match result {
       Ok(_) => {
-        log::info!("INSERT INTO public.runes: {}", rune_entry.etching);
+        log::info!(
+          "INSERT INTO public.runes: {},{}",
+          hex_rune_id,
+          rune_entry.etching
+        );
       }
       Err(error) => {
-        log::error!("An error occurred INSERT INTO public.runes: {}", error);
+        log::error!(
+          "An error occurred INSERT INTO public.runes: {},{}",
+          hex_rune_id,
+          error
+        );
       }
     }
 
