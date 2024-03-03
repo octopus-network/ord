@@ -400,35 +400,32 @@ impl<'a, 'db, 'tx, 'index> RuneUpdater<'a, 'db, 'tx, 'index> {
       // handle runes related inputs
       for (input_n, input) in tx.input.iter().enumerate() {
         let tx_input = TxInput::from_txin(input, &txid, input_n as i32);
-        tx_inputs.push(tx_input.clone());
         if let (Some(pg_pool), Some(runtime)) = (&self.index.pg_pool, &self.index.runtime) {
           runtime.block_on(async {
-            if !tx_inputs.is_empty() {
-              let mut update_outpoints: Vec<OutpointBalance> = Vec::new();
-              for input in &tx_inputs {
-                let outpoint = self
-                  .pg_select_outpoint_balances(
-                    pg_pool,
-                    input.prevout_tx_id.as_ref().unwrap(),
-                    input.prevout,
-                  )
-                  .await;
+            let mut update_outpoints: Vec<OutpointBalance> = Vec::new();
+            let outpoint = self
+              .pg_select_outpoint_balances(
+                pg_pool,
+                tx_input.prevout_tx_id.as_ref().unwrap(),
+                tx_input.prevout,
+              )
+              .await;
 
-                if let Ok(Some(mut out_item)) = outpoint {
-                  out_item.spent = true;
-                  update_outpoints.push(out_item.clone());
+            if let Ok(Some(mut out_item)) = outpoint {
+              out_item.spent = true;
+              update_outpoints.push(out_item.clone());
 
-                  let key = (out_item.rune_id.clone(), out_item.address.clone());
-                  // neg rune_amount
-                  let rune_amount = -out_item.rune_amount.clone();
-                  rune_balance_map.insert(key, rune_amount);
-                }
-              }
+              let key = (out_item.rune_id.clone(), out_item.address.clone());
+              // neg rune_amount
+              let rune_amount = -out_item.rune_amount.clone();
+              rune_balance_map.insert(key, rune_amount);
 
-              let _ = self
-                .pg_update_outpoint_balances(pg_pool, update_outpoints)
-                .await;
+              tx_inputs.push(tx_input);
             }
+
+            let _ = self
+              .pg_update_outpoint_balances(pg_pool, update_outpoints)
+              .await;
           });
         }
       }
