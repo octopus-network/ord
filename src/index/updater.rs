@@ -2,6 +2,8 @@ use {
   self::{inscription_updater::InscriptionUpdater, rune_updater::RuneUpdater},
   super::{fetcher::Fetcher, *},
   futures::future::try_join_all,
+  sqlx::postgres::PgPoolOptions,
+  std::env,
   std::sync::mpsc,
   tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender},
 };
@@ -582,6 +584,14 @@ impl<'index> Updater<'index> {
         .map(|x| x.value())
         .unwrap_or(0);
 
+      let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+      let database_url = env::var("DATABASE_URL")?;
+      let pg_pool =
+        runtime.block_on(async { PgPoolOptions::new().connect(&database_url).await })?;
+
       let mut rune_updater = RuneUpdater {
         height: self.height,
         id_to_entry: &mut rune_id_to_rune_entry,
@@ -595,6 +605,9 @@ impl<'index> Updater<'index> {
         timestamp: block.header.time,
         transaction_id_to_rune: &mut transaction_id_to_rune,
         updates: HashMap::new(),
+        runtime,
+        pg_pool,
+        chain: self.index.settings.chain(),
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
