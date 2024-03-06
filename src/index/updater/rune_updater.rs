@@ -1,10 +1,7 @@
 use {
+  self::runes::transaction::{RsTxIn, RsTxOut},
   super::*,
-  crate::{
-    index::entry::{OutpointBalance, RuneBalance, TxInput, TxOutput},
-    runes::{varint, Edict, Runestone},
-  },
-  bigdecimal::{BigDecimal, FromPrimitive},
+  crate::runes::{transaction::RsTransaction, varint, Edict, Runestone},
   sqlx::postgres::PgPool,
 };
 
@@ -30,7 +27,7 @@ pub(crate) struct RuneUpdate {
   pub(crate) supply: u128,
 }
 
-pub(super) struct RuneUpdater<'a, 'db, 'tx> {
+pub(super) struct RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
   pub(super) height: u32,
   pub(super) id_to_entry: &'a mut Table<'db, 'tx, RuneIdValue, RuneEntryValue>,
   pub(super) inscription_id_to_sequence_number: &'a Table<'db, 'tx, InscriptionIdValue, u32>,
@@ -43,24 +40,90 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx> {
   pub(super) timestamp: u32,
   pub(super) transaction_id_to_rune: &'a mut Table<'db, 'tx, &'static TxidValue, u128>,
   pub(super) updates: HashMap<RuneId, RuneUpdate>,
-  pub(super) runtime: Runtime,
-  pub(super) pg_pool: PgPool,
-  pub(super) chain: Chain,
+  pub(super) runtime: Arc<Runtime>,
+  pub(super) pg_pool: &'pool PgPool,
+  pub(super) index: &'index Index,
+  pub(super) rs_tx: RsTransaction,
+  pub(super) rune_balances: HashMap<(Address, RuneId), (u128, u128)>,
 }
 
-impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
+impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
   pub(super) fn index_runes(&mut self, index: usize, tx: &Transaction, txid: Txid) -> Result<()> {
+    self.rs_tx = RsTransaction::default();
+
     let runestone = Runestone::from_transaction(tx);
+    let has_runes = tx.input.iter().any(|input| {
+      if let Ok(Some(_v)) = self
+        .outpoint_to_balances
+        .get(&input.previous_output.store())
+      {
+        true
+      } else {
+        false
+      }
+    });
+    if runestone.is_some() || has_runes {
+      for input in tx.input.iter() {
+        if input.previous_output.txid
+          == Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap()
+        {
+          continue;
+        }
+        let prev_output = self
+          .index
+          .get_transaction(input.previous_output.txid)?
+          .unwrap()
+          .output
+          .into_iter()
+          .nth(input.previous_output.vout as usize)
+          .unwrap();
+
+        if let Ok(address) = self
+          .index
+          .settings
+          .chain()
+          .address_from_script(&prev_output.script_pubkey)
+        {
+          let tx_in = RsTxIn {
+            value: Amount::from_sat(prev_output.value),
+            address,
+            runes: vec![],
+          };
+          self.rs_tx.inputs.push(tx_in);
+        } else {
+          log::error!(
+            "Failed to convert script_pubkey to address: {:?}",
+            prev_output.script_pubkey
+          );
+          continue;
+        }
+      }
+      for output in tx.output.iter() {
+        let tx_out = RsTxOut {
+          value: Amount::from_sat(output.value),
+          address: if output.script_pubkey.is_op_return() {
+            None
+          } else {
+            self
+              .index
+              .settings
+              .chain()
+              .address_from_script(&output.script_pubkey)
+              .ok()
+          },
+          op_return: if output.script_pubkey.is_op_return() {
+            runestone.clone()
+          } else {
+            None
+          },
+          runes: vec![],
+        };
+        self.rs_tx.outputs.push(tx_out);
+      }
+    }
 
     let mut unallocated = self.unallocated(tx)?;
-
-    let mut tx_inputs: Vec<TxInput> = Vec::new();
-    let mut tx_outputs: Vec<TxOutput> = Vec::new();
-    let mut outpoints: Vec<OutpointBalance> = Vec::new();
-    let mut update_rune_balances: Vec<RuneBalance> = Vec::new();
-    let mut add_rune_balances: Vec<RuneBalance> = Vec::new();
-    // (rune_id, address) -> rune_amount
-    let mut rune_balance_map: HashMap<(String, String), BigDecimal> = HashMap::new();
 
     let burn = runestone
       .as_ref()
@@ -95,7 +158,7 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
       let mut etched = self.etched(index, &runestone)?;
 
       if !burn {
-        for Edict { id, amount, output } in runestone.edicts {
+        for Edict { id, amount, output } in runestone.edicts.clone() {
           let Ok(output) = usize::try_from(output) else {
             continue;
           };
@@ -221,6 +284,19 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
       if tx.output[vout].script_pubkey.is_op_return() {
         for (id, balance) in &balances {
           *burned.entry(*id).or_default() += balance;
+
+          if let Ok(rune_id) = RuneId::try_from(*id) {
+            self
+              .rs_tx
+              .outputs
+              .get_mut(vout)
+              .expect("op_return must exist; QED")
+              .runes
+              .push((rune_id, *balance));
+          } else {
+            log::warn!("Failed to convert id to RuneId: {}", id);
+            continue;
+          }
         }
         continue;
       }
@@ -232,9 +308,28 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
       // Sort balances by id so tests can assert balances in a fixed order
       balances.sort();
 
+      let address = self.rs_tx.outputs[vout].address.clone().unwrap();
       for (id, balance) in balances {
         varint::encode_to_vec(id, &mut buffer);
         varint::encode_to_vec(balance, &mut buffer);
+        if let Ok(rune_id) = RuneId::try_from(id) {
+          self
+            .rune_balances
+            .entry((address.clone(), rune_id))
+            .or_default()
+            .1 += balance;
+
+          self
+            .rs_tx
+            .outputs
+            .get_mut(vout)
+            .expect("output must exist; QED")
+            .runes
+            .push((rune_id, balance));
+        } else {
+          log::warn!("Failed to convert id to RuneId: {}", id);
+          continue;
+        }
       }
 
       self.outpoint_to_balances.insert(
@@ -255,403 +350,15 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
         .or_default()
         .burned += amount;
     }
-
-    Ok(())
-  }
-
-  // PostgreSQL
-  pub(crate) async fn pg_insert_tx_inputs(&self, tx_inputs: Vec<TxInput>) -> Result<()> {
-    for tx_input in tx_inputs {
-      let result = sqlx::query!(
-        r#"
-          INSERT INTO public.tx_inputs (
-          tx_id, n, prevout_tx_id, prevout, script_sig, sequence, witness
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-          ON CONFLICT (tx_id, n) DO NOTHING
-          "#,
-        tx_input.tx_id,
-        tx_input.n,
-        tx_input.prevout_tx_id,
-        tx_input.prevout,
-        tx_input.script_sig,
-        tx_input.sequence,
-        tx_input.witness
-      )
-      .execute(&self.pg_pool)
-      .await;
-
-      match result {
-        Ok(_) => {
-          log::info!("INSERT INTO public.tx_inputs: {}", tx_input.tx_id);
-        }
-        Err(error) => {
-          log::error!("An error occurred INSERT INTO public.tx_inputs: {}", error);
-        }
-      }
+    if !self.rs_tx.outputs.is_empty() || !self.rs_tx.inputs.is_empty() {
+      self.runtime.block_on(async {
+        let _ = self
+          .pg_insert_rs_transaction(txid, self.rs_tx.clone())
+          .await;
+      });
     }
 
     Ok(())
-  }
-
-  pub(crate) async fn pg_insert_tx_outputs(&self, tx_outputs: Vec<TxOutput>) -> Result<()> {
-    for tx_output in tx_outputs {
-      let result = sqlx::query!(
-        r#"
-          INSERT INTO tx_outputs (tx_id, vout, value, script_pubkey, is_op_return, op_return_data)
-          VALUES ($1, $2, $3, $4, $5, $6)
-          ON CONFLICT (tx_id, vout) DO NOTHING
-        "#,
-        tx_output.tx_id,
-        tx_output.vout,
-        tx_output.value,
-        tx_output.script_pubkey,
-        tx_output.is_op_return,
-        tx_output.op_return_data,
-      )
-      .execute(&self.pg_pool)
-      .await;
-
-      match result {
-        Ok(_) => {
-          log::info!("INSERT INTO public.tx_outputs: {}", tx_output.tx_id);
-        }
-        Err(error) => {
-          log::error!("An error occurred INSERT INTO public.tx_outputs: {}", error);
-        }
-      }
-    }
-    Ok(())
-  }
-
-  pub(crate) async fn pg_insert_runes(
-    &self,
-    hex_rune_id: &str,
-    rune_entry: RuneEntry,
-  ) -> Result<()> {
-    let mut mint_deadline: i32 = 0;
-    let mut mint_limit = BigDecimal::from(0);
-    let mut mint_term: i32 = 0;
-    match rune_entry.mint {
-      Some(mint_entry) => {
-        if let Some(deadline_value) = mint_entry.deadline {
-          mint_deadline = deadline_value as i32;
-        } else if let Some(end_value) = mint_entry.end {
-          mint_term = end_value as i32;
-        } else if let Some(limit_value) = mint_entry.limit {
-          mint_limit = BigDecimal::from_i128(limit_value as i128).unwrap_or(BigDecimal::from(0));
-        }
-      }
-      None => {}
-    }
-
-    let open_etching: bool = match rune_entry.mint {
-      Some(mint_entry) => {
-        if mint_entry.deadline.is_some() || mint_entry.end.is_some() {
-          true
-        } else {
-          false
-        }
-      }
-      None => false,
-    };
-
-    let rune_timestamp = Utc.timestamp_opt(rune_entry.timestamp as i64, 0).unwrap();
-
-    let result = sqlx::query!(
-      r#"
-        INSERT INTO public.runes
-        (rune_id, rune, symbol, divisibility, spacers, open_etching, mint_deadline, mint_limit, mint_term, rune_timestamp, etching_txid, burned, mints, supply)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-        "#,
-      hex_rune_id,
-      rune_entry.rune.to_string(),
-      rune_entry.symbol.map(|c| c as i8),
-      rune_entry.divisibility as i16,
-      rune_entry.spacers.to_string(),
-      open_etching,
-      mint_deadline,
-      mint_limit,
-      mint_term,
-      rune_timestamp,
-      rune_entry.etching.to_string(),
-      BigDecimal::from_i128(rune_entry.burned as i128).unwrap_or(BigDecimal::from(0)),
-      BigDecimal::from_i128(rune_entry.mints as i128).unwrap_or(BigDecimal::from(0)),
-      BigDecimal::from_i128(rune_entry.supply as i128).unwrap_or(BigDecimal::from(0)),
-    )
-    .execute(&self.pg_pool)
-    .await;
-
-    match result {
-      Ok(_) => {
-        log::info!(
-          "INSERT INTO public.runes: {},{}",
-          hex_rune_id,
-          rune_entry.etching
-        );
-      }
-      Err(error) => {
-        log::error!(
-          "An error occurred INSERT INTO public.runes: {},{}",
-          hex_rune_id,
-          error
-        );
-      }
-    }
-
-    Ok(())
-  }
-
-  pub(crate) async fn pg_select_outpoint_balances(
-    &self,
-    txid: &str,
-    vout: i32,
-  ) -> Result<Option<OutpointBalance>> {
-    let result = sqlx::query!(
-      r#"
-        SELECT * FROM public.outpoint_balances
-        WHERE tx_id = $1 AND vout = $2
-        "#,
-      txid,
-      vout,
-    )
-    .fetch_optional(&self.pg_pool)
-    .await;
-
-    match result {
-      Ok(Some(row)) => {
-        log::info!(
-          "SELECT public.outpoint_balances with txid and vout: {},{}",
-          row.tx_id,
-          row.vout,
-        );
-        Ok(Some(OutpointBalance {
-          tx_id: row.tx_id,
-          vout: row.vout,
-          address: row.address,
-          rune_id: row.rune_id,
-          rune_amount: row.rune_amount,
-          burn: row.burn.unwrap_or(false),
-          spent: row.spent.unwrap_or(false),
-          value: row.value,
-        }))
-      }
-      Ok(None) => {
-        log::info!("No. SELECT public.outpoint_balances: {},{}", txid, vout,);
-        Ok(None)
-      }
-      Err(error) => {
-        log::error!(
-          "An error occurred SELECT public.outpoint_balances: {}",
-          error
-        );
-        Ok(None)
-      }
-    }
-  }
-
-  pub(crate) async fn pg_select_rune_balances(
-    &self,
-    rune_id: &str,
-    address: &str,
-  ) -> Result<Option<RuneBalance>> {
-    let result = sqlx::query!(
-      r#"
-        SELECT * FROM public.runes_balances
-        WHERE rune_id = $1 AND address = $2
-        "#,
-      rune_id,
-      address,
-    )
-    .fetch_optional(&self.pg_pool)
-    .await;
-
-    match result {
-      Ok(Some(row)) => {
-        log::info!(
-          "Exist. SELECT public.runes_balances: {},{}",
-          rune_id,
-          address,
-        );
-        Ok(Some(RuneBalance {
-          rune_id: row.rune_id,
-          address: row.address,
-          rune_amount: row.rune_amount,
-        }))
-      }
-      Ok(None) => {
-        log::info!("No. SELECT public.runes_balances: {},{}", rune_id, address,);
-        Ok(None)
-      }
-      Err(error) => {
-        log::error!(
-          "An error occurred SELECT public.runes_balances: {},{},{}",
-          rune_id,
-          address,
-          error
-        );
-        Ok(None)
-      }
-    }
-  }
-
-  pub(crate) async fn pg_insert_rune_balances(
-    &self,
-    rune_balances: Vec<RuneBalance>,
-  ) -> Result<()> {
-    for balance in rune_balances {
-      let result = sqlx::query!(
-        r#"
-          INSERT INTO public.runes_balances (rune_id, address, rune_amount)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (rune_id, address) DO NOTHING
-        "#,
-        &balance.rune_id,
-        &balance.address,
-        balance.rune_amount.clone(),
-      )
-      .execute(&self.pg_pool)
-      .await;
-
-      match result {
-        Ok(_) => {
-          log::info!(
-            "INSERT INTO public.runes_balances: {}",
-            balance.address.clone()
-          );
-        }
-        Err(error) => {
-          log::error!(
-            "An error occurred INSERT INTO public.runes_balances: {},{},{}",
-            balance.rune_id.clone(),
-            balance.address.clone(),
-            error
-          );
-        }
-      }
-    }
-    Ok(())
-  }
-
-  pub(crate) async fn pg_insert_outpoint_balances(
-    &self,
-    outpoint_balances: Vec<OutpointBalance>,
-  ) -> Result<()> {
-    for outpoint in outpoint_balances {
-      let result = sqlx::query!(
-        r#"INSERT INTO public.outpoint_balances (tx_id, vout, address, rune_id, rune_amount, burn, spent, value)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
-         outpoint.tx_id,
-         outpoint.vout,
-         outpoint.address,
-         outpoint.rune_id,
-         outpoint.rune_amount,
-         outpoint.burn,
-         outpoint.spent,
-         outpoint.value,
-    )
-    .execute(&self.pg_pool)
-    .await;
-
-      match result {
-        Ok(_) => {
-          log::info!(
-            "INSERT INTO public.outpoint_balances: {}",
-            outpoint.address.clone()
-          );
-        }
-        Err(error) => {
-          log::error!(
-            "An error occurred INSERT INTO public.outpoint_balances: {},{}",
-            outpoint.address.clone(),
-            error
-          );
-        }
-      }
-    }
-    Ok(())
-  }
-
-  pub(crate) async fn pg_update_outpoint_balances(
-    &self,
-    outpoint_balances: Vec<OutpointBalance>,
-  ) -> Result<()> {
-    for outpoint in outpoint_balances {
-      let result = sqlx::query!(
-        r#"UPDATE public.outpoint_balances
-          SET spent = $1
-          WHERE tx_id = $2 AND vout = $3
-         "#,
-        outpoint.spent,
-        outpoint.tx_id,
-        outpoint.vout,
-      )
-      .execute(&self.pg_pool)
-      .await;
-
-      match result {
-        Ok(_) => {
-          log::info!(
-            "UPDATE public.outpoint_balances: {},{}",
-            outpoint.address.clone(),
-            outpoint.spent,
-          );
-        }
-        Err(error) => {
-          log::error!(
-            "An error occurred UPDATE public.outpoint_balances: {}",
-            error
-          );
-        }
-      }
-    }
-    Ok(())
-  }
-
-  pub(crate) async fn pg_update_rune_balances(
-    &self,
-    rune_balances: Vec<RuneBalance>,
-  ) -> Result<()> {
-    for rune in rune_balances {
-      let result = sqlx::query!(
-        r#"UPDATE public.runes_balances
-          SET rune_amount = $1
-          WHERE rune_id = $2 AND address = $3
-         "#,
-        rune.rune_amount.clone(),
-        rune.rune_id.clone(),
-        rune.address.clone(),
-      )
-      .execute(&self.pg_pool)
-      .await;
-
-      match result {
-        Ok(_) => {
-          log::info!(
-            "UPDATE public.runes_balances: {},{},{}",
-            rune.rune_id.clone(),
-            rune.address.clone(),
-            rune.rune_amount.clone(),
-          );
-        }
-        Err(error) => {
-          log::error!(
-            "An error occurred UPDATE public.runes_balances: {},{},{}",
-            rune.rune_id.clone(),
-            rune.address.clone(),
-            error
-          );
-        }
-      }
-    }
-    Ok(())
-  }
-
-  fn get_address_from_script_pubkey(&self, script_pubkey: Vec<u8>) -> String {
-    self
-      .chain
-      .address_from_script(&ScriptBuf::from_bytes(script_pubkey))
-      .map(|address| address.to_string())
-      .unwrap_or_else(|e| e.to_string())
   }
 
   fn create_rune_entry(&mut self, txid: Txid, burn: bool, etched: Etched) -> Result {
@@ -673,31 +380,33 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
     self
       .statistic_to_count
       .insert(&Statistic::Runes.into(), self.runes)?;
-    self.id_to_entry.insert(
-      id.store(),
-      RuneEntry {
-        burned: 0,
-        divisibility,
-        etching: txid,
-        mints: 0,
-        number,
-        mint: mint.and_then(|mint| (!burn).then_some(mint)),
-        rune,
-        spacers,
-        supply: if let Some(mint) = mint {
-          if mint.end == Some(self.height) {
-            0
-          } else {
-            mint.limit.unwrap_or(runes::MAX_LIMIT)
-          }
+
+    let rune_entry = RuneEntry {
+      burned: 0,
+      divisibility,
+      etching: txid,
+      mints: 0,
+      number,
+      mint: mint.and_then(|mint| (!burn).then_some(mint)),
+      rune,
+      spacers,
+      supply: if let Some(mint) = mint {
+        if mint.end == Some(self.height) {
+          0
         } else {
-          u128::MAX
-        } - balance,
-        symbol,
-        timestamp: self.timestamp,
-      }
-      .store(),
-    )?;
+          mint.limit.unwrap_or(runes::MAX_LIMIT)
+        }
+      } else {
+        u128::MAX
+      } - balance,
+      symbol,
+      timestamp: self.timestamp,
+    };
+    self.id_to_entry.insert(id.store(), rune_entry.store())?;
+
+    self.runtime.block_on(async {
+      let _ = self.pg_insert_rune(id, rune_entry).await;
+    });
 
     let inscription_id = InscriptionId { txid, index: 0 };
 
@@ -816,7 +525,7 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
     let mut unallocated: HashMap<u128, u128> = HashMap::new();
 
     // increment unallocated runes with the runes in tx inputs
-    for input in &tx.input {
+    for (index, input) in tx.input.iter().enumerate() {
       if let Some(guard) = self
         .outpoint_to_balances
         .remove(&input.previous_output.store())?
@@ -829,10 +538,255 @@ impl<'a, 'db, 'tx> RuneUpdater<'a, 'db, 'tx> {
           let (balance, len) = varint::decode(&buffer[i..]);
           i += len;
           *unallocated.entry(id).or_default() += balance;
+
+          let address = self.rs_tx.inputs[index].address.clone();
+
+          if let Ok(rune_id) = RuneId::try_from(id) {
+            self.rune_balances.entry((address, rune_id)).or_default().0 += balance;
+
+            self
+              .rs_tx
+              .inputs
+              .get_mut(index)
+              .expect("input must exist; QED")
+              .runes
+              .push((rune_id, balance));
+          } else {
+            log::warn!("Failed to convert id to RuneId: {}", id);
+            continue;
+          }
         }
       }
     }
 
     Ok(unallocated)
+  }
+
+  pub(crate) async fn pg_insert_rs_transaction(
+    &self,
+    tx_id: Txid,
+    rs_tx: RsTransaction,
+  ) -> Result<()> {
+    let result = sqlx::query!(
+      r#"
+          INSERT INTO public.rs_transactions (tx_id, transaction)
+          VALUES ($1, $2)
+          ON CONFLICT (tx_id) DO NOTHING
+        "#,
+      tx_id.to_string(),
+      serde_json::to_value(rs_tx)?,
+    )
+    .execute(self.pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::info!("INSERT INTO rs_transactions: {}", tx_id);
+      }
+      Err(error) => {
+        log::error!("An error occurred INSERT INTO rs_transactions: {}", error);
+      }
+    }
+
+    Ok(())
+  }
+
+  pub(crate) async fn pg_insert_rune(&self, rune_id: RuneId, rune_entry: RuneEntry) -> Result<()> {
+    let result = sqlx::query!(
+      r#"
+        INSERT INTO public.runes
+        (rune_id, spaced_rune, number, divisibility, symbol, etching, mint_deadline, mint_end, mint_limit, mints, burned, supply, timestamp)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        "#,
+      rune_id.to_string(),
+      SpacedRune{rune: rune_entry.rune, spacers: rune_entry.spacers}.to_string(),
+      rune_entry.number.to_string(),
+      rune_entry.divisibility as i16,
+      rune_entry.symbol.map(|s|s.to_string()),
+      rune_entry.etching.to_string(),
+      rune_entry.mint.and_then(|m|m.deadline).map(|d| d as i64),
+      rune_entry.mint.and_then(|m|m.end).map(|e| e as i64),
+      rune_entry.mint.and_then(|m|m.limit).map(|l| l.to_string()),
+      rune_entry.mints.to_string(),
+      rune_entry.burned.to_string(),
+      rune_entry.supply.to_string(),
+      Utc.timestamp_opt(rune_entry.timestamp as i64, 0).unwrap(),
+    )
+    .execute(self.pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::info!(
+          "INSERT INTO public.runes: {},{}",
+          rune_id,
+          rune_entry.etching
+        );
+      }
+      Err(error) => {
+        log::error!(
+          "An error occurred INSERT INTO public.runes: {},{}",
+          rune_id,
+          error
+        );
+      }
+    }
+
+    Ok(())
+  }
+
+  pub(crate) async fn pg_query_rune(
+    pg_pool: &PgPool,
+    rune_id: RuneId,
+  ) -> Result<RuneEntry, sqlx::Error> {
+    let result = sqlx::query!(
+      r#"
+      SELECT rune_id, spaced_rune, number, divisibility, symbol, etching, mint_deadline, mint_end, mint_limit, mints, burned, supply, timestamp
+      FROM public.runes
+      WHERE rune_id = $1
+      "#,
+      rune_id.to_string()
+    )
+    .fetch_one(pg_pool)
+    .await;
+
+    match result {
+      Ok(row) => {
+        log::info!("UPDATE public.runes: {}", rune_id);
+        let spaced_rune = SpacedRune::from_str(&row.spaced_rune).unwrap();
+        let rune_entry = RuneEntry {
+          rune: spaced_rune.rune,
+          spacers: spaced_rune.spacers,
+          number: u64::from_str(&row.number).unwrap(),
+          divisibility: row.divisibility as u8,
+          symbol: row.symbol.map(|s| s.parse::<char>().unwrap()),
+          etching: Txid::from_str(&row.etching).unwrap(),
+          mint: Some(MintEntry {
+            deadline: row.mint_deadline.map(|d| d as u32),
+            end: row.mint_end.map(|e| e as u32),
+            limit: row.mint_limit.map(|l| l.parse().unwrap()),
+          }),
+          mints: row.mints.parse().unwrap(),
+          burned: row.burned.parse().unwrap(),
+          supply: row.supply.parse().unwrap(),
+          timestamp: row.timestamp.timestamp() as u32,
+        };
+        return Ok(rune_entry);
+      }
+      Err(error) => {
+        log::error!(
+          "An error occurred UPDATE public.runes: {},{}",
+          rune_id,
+          error
+        );
+        return Err(error);
+      }
+    }
+  }
+
+  pub(crate) async fn pg_update_rune(
+    pg_pool: &PgPool,
+    rune_id: RuneId,
+    rune_entry: RuneEntry,
+  ) -> Result<(), sqlx::Error> {
+    let result = sqlx::query!(
+      r#"
+      UPDATE public.runes
+      SET mints = $2, burned = $3, supply = $4
+      WHERE rune_id = $1
+      "#,
+      rune_id.to_string(),
+      rune_entry.mints.to_string(),
+      rune_entry.burned.to_string(),
+      rune_entry.supply.to_string(),
+    )
+    .execute(pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::info!("UPDATE public.runes: {}", rune_id);
+      }
+      Err(error) => {
+        log::error!(
+          "An error occurred UPDATE public.runes: {},{}",
+          rune_id,
+          error
+        );
+      }
+    }
+
+    Ok(())
+  }
+
+  pub(crate) async fn pg_query_rune_balance(
+    pg_pool: &PgPool,
+    rune_id: RuneId,
+    address: Address,
+  ) -> Result<u128, sqlx::Error> {
+    let result = sqlx::query!(
+      r#"
+      SELECT rune_id, address, amount
+      FROM public.rune_balances
+      WHERE rune_id = $1 AND address = $2
+      "#,
+      rune_id.to_string(),
+      address.to_string(),
+    )
+    .fetch_one(pg_pool)
+    .await;
+    match result {
+      Ok(row) => {
+        log::info!("QUERY public.rune_balances: {}, {}", rune_id, address);
+        return Ok(row.amount.parse().unwrap());
+      }
+      Err(error) => {
+        log::error!(
+          "An error occurred QUERY public.rune_balances: {},{},{}",
+          rune_id,
+          address,
+          error
+        );
+        return Ok(0);
+      }
+    }
+  }
+
+  pub(crate) async fn pg_update_rune_balance(
+    pg_pool: &PgPool,
+    rune_id: RuneId,
+    address: Address,
+    amount: u128,
+  ) -> Result<(), sqlx::Error> {
+    let result = sqlx::query!(
+      r#"
+      INSERT INTO public.rune_balances (rune_id, address, amount)
+      VALUES ($1, $2, $3)
+      ON CONFLICT(rune_id, address)
+      DO UPDATE SET
+        amount = EXCLUDED.amount;
+      "#,
+      rune_id.to_string(),
+      address.to_string(),
+      amount.to_string(),
+    )
+    .execute(pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::info!("UPDATE public.rune_balances: {},{}", rune_id, address);
+        Ok(())
+      }
+      Err(error) => {
+        log::error!(
+          "An error occurred UPDATE public.rune_balances: {},{},{}",
+          rune_id,
+          address,
+          error
+        );
+        Err(error)
+      }
+    }
   }
 }

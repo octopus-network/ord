@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n          INSERT INTO public.rs_transactions (tx_id, transaction)\n          VALUES ($1, $2)\n          ON CONFLICT (tx_id) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Json"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2289b0af88414850cfdc91fb39442cb21b27ff66b8bbb5d6a419791d78d747fb"
+}

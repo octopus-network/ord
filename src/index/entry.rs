@@ -1,4 +1,4 @@
-use {super::*, bigdecimal::BigDecimal, sqlx::FromRow};
+use super::*;
 
 pub(crate) trait Entry: Sized {
   type Value;
@@ -391,96 +391,6 @@ impl Entry for Txid {
   fn store(self) -> Self::Value {
     Txid::to_byte_array(self)
   }
-}
-
-#[derive(Clone, Serialize, Deserialize, FromRow)]
-pub(crate) struct TxInput {
-  pub(crate) tx_id: String,
-  pub(crate) n: i32,
-  pub(crate) prevout_tx_id: Option<String>,
-  pub(crate) prevout: i32,
-  pub(crate) script_sig: Vec<u8>,
-  pub(crate) sequence: Option<String>,
-  pub(crate) witness: Option<Vec<u8>>,
-}
-
-impl TxInput {
-  pub fn from_txin(txin: &TxIn, tx_id: &Txid, n: i32) -> Self {
-    let prevout_tx_id = Some(txin.previous_output.txid.to_string());
-    let prevout = txin.previous_output.vout as i32;
-    let script_sig = txin.script_sig.to_bytes();
-    let sequence = Some(txin.sequence.to_string());
-    let witness = None;
-    // Serialize witness data if present
-    // let witness = if !txin.witness.is_empty() {
-    //   let mut cursor = Cursor::new(Vec::new());
-    //   let result = txin.witness.consensus_encode(&mut cursor);
-
-    //   match result {
-    //     Ok(_) => Some(cursor.into_inner()),
-    //     Err(_) => None,
-    //   }
-    // } else {
-    //   None
-    // };
-
-    TxInput {
-      tx_id: tx_id.to_string(),
-      n,
-      prevout_tx_id,
-      prevout,
-      script_sig,
-      sequence,
-      witness,
-    }
-  }
-}
-
-#[derive(Clone, Serialize, Deserialize, FromRow)]
-pub(crate) struct TxOutput {
-  pub(crate) tx_id: String,
-  pub(crate) vout: i32,
-  pub(crate) value: i64,
-  pub(crate) script_pubkey: Vec<u8>,
-  pub(crate) is_op_return: bool,
-  pub(crate) op_return_data: Option<serde_json::Value>,
-}
-
-impl TxOutput {
-  pub fn from_txout(txout: &TxOut, tx_id: &Txid, vout: i32) -> TxOutput {
-    let is_op_return = if txout.script_pubkey.is_op_return() {
-      true
-    } else {
-      false
-    };
-    TxOutput {
-      tx_id: tx_id.to_string(),
-      vout,
-      value: txout.value as i64,
-      script_pubkey: txout.script_pubkey.clone().into_bytes(),
-      is_op_return,
-      op_return_data: None,
-    }
-  }
-}
-
-#[derive(Clone, Serialize, Deserialize, FromRow)]
-pub(crate) struct RuneBalance {
-  pub(crate) rune_id: String,
-  pub(crate) address: String,
-  pub(crate) rune_amount: BigDecimal,
-}
-
-#[derive(Clone, Serialize, Deserialize, FromRow)]
-pub(crate) struct OutpointBalance {
-  pub(crate) tx_id: String,
-  pub(crate) vout: i32,
-  pub(crate) address: String,
-  pub(crate) rune_id: String,
-  pub(crate) rune_amount: BigDecimal,
-  pub(crate) burn: bool,
-  pub(crate) spent: bool,
-  pub(crate) value: i64,
 }
 
 #[cfg(test)]

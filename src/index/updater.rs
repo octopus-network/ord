@@ -1,10 +1,10 @@
 use {
   self::{inscription_updater::InscriptionUpdater, rune_updater::RuneUpdater},
   super::{fetcher::Fetcher, *},
+  crate::runes::transaction::RsTransaction,
   futures::future::try_join_all,
   sqlx::postgres::PgPoolOptions,
-  std::env,
-  std::sync::mpsc,
+  std::{env, sync::mpsc},
   tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender},
 };
 
@@ -584,9 +584,11 @@ impl<'index> Updater<'index> {
         .map(|x| x.value())
         .unwrap_or(0);
 
-      let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
+      let runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+          .enable_all()
+          .build()?,
+      );
 
       let database_url = env::var("DATABASE_URL")?;
       let pg_pool =
@@ -605,14 +607,18 @@ impl<'index> Updater<'index> {
         timestamp: block.header.time,
         transaction_id_to_rune: &mut transaction_id_to_rune,
         updates: HashMap::new(),
-        runtime,
-        pg_pool,
-        chain: self.index.settings.chain(),
+        runtime: runtime.clone(),
+        pg_pool: &pg_pool,
+        index: &self.index,
+        rs_tx: RsTransaction::default(),
+        rune_balances: HashMap::new(),
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
         rune_updater.index_runes(i, tx, *txid)?;
       }
+
+      let rune_balances = rune_updater.rune_balances.clone();
 
       for (rune_id, update) in rune_updater.updates {
         let mut entry = RuneEntry::load(
@@ -627,6 +633,32 @@ impl<'index> Updater<'index> {
         entry.supply += update.supply;
 
         rune_id_to_rune_entry.insert(&rune_id.store(), entry.store())?;
+        runtime.block_on(async {
+          if let Ok(mut rune_entry) = RuneUpdater::pg_query_rune(&pg_pool, rune_id).await {
+            rune_entry.burned += update.burned;
+            rune_entry.mints += update.mints;
+            rune_entry.supply += update.supply;
+            let _ = RuneUpdater::pg_update_rune(&pg_pool, rune_id, rune_entry)
+              .await
+              .unwrap();
+          }
+        });
+      }
+
+      for ((address, rune_id), (decrease, increase)) in rune_balances {
+        runtime.block_on(async {
+           if let Ok(mut amount) = RuneUpdater::pg_query_rune_balance(&pg_pool, rune_id, address.clone()).await {
+            if amount >= decrease {
+            amount -= decrease;
+            } else {
+              log::error!("Rune balance is less than decrease amount rune_id: {:?}, address {:?} amount: {:?}, decrease: {:?}", rune_id, address, amount, decrease);
+            }
+            amount += increase;
+           let _ = RuneUpdater::pg_update_rune_balance(&pg_pool, rune_id, address, amount)
+             .await
+             .unwrap();
+           }
+        });
       }
     }
 
