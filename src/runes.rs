@@ -21,6 +21,7 @@ mod rune_id;
 mod runestone;
 mod spaced_rune;
 mod tag;
+pub mod transaction;
 pub mod varint;
 
 type Result<T, E = Error> = std::result::Result<T, E>;

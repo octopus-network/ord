@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n      SELECT rune_id, spaced_rune, number, divisibility, symbol, etching, mint_deadline, mint_end, mint_limit, mints, burned, supply, timestamp\n      FROM public.runes\n      WHERE rune_id = $1\n      ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rune_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "spaced_rune",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "number",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "divisibility",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 4,
+        "name": "symbol",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "etching",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "mint_deadline",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "mint_end",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "mint_limit",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "mints",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "burned",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "supply",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "timestamp",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c083c08bbc1b41d874287b2ec848a2d1fdd17dbb3cc3d92b1bf058013d86c320"
+}
