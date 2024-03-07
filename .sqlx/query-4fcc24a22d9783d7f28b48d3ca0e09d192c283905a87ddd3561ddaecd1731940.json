@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n          UPDATE public.rs_runes\n          SET burned = $2\n          WHERE rune_id = $1\n      ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4fcc24a22d9783d7f28b48d3ca0e09d192c283905a87ddd3561ddaecd1731940"
+}
