@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n          INSERT INTO public.rune_balances (rune_id, address, amount)\n          VALUES ($1, $2, $3)\n          ON CONFLICT (rune_id, address)\n          DO UPDATE SET amount = EXCLUDED.amount\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9c366f0de7395c0086967444edfb922d154e32b80fe2c3b201ff5824e23c647c"
+}

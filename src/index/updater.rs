@@ -2,6 +2,7 @@ use {
   self::{inscription_updater::InscriptionUpdater, rune_updater::RuneUpdater},
   super::{fetcher::Fetcher, *},
   futures::future::try_join_all,
+  ordinals::RsTransaction,
   std::sync::mpsc,
   tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender},
 };
@@ -607,13 +608,60 @@ impl<'index> Updater<'index> {
         sequence_number_to_rune_id: &mut sequence_number_to_rune_id,
         statistic_to_count: &mut statistic_to_count,
         transaction_id_to_rune: &mut transaction_id_to_rune,
+        index: &self.index,
+        rs_tx: RsTransaction::default(),
+        rune_balances: HashMap::new(),
+        rune_transactions: HashSet::new(),
+        address_transactions: HashSet::new(),
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
         rune_updater.index_runes(u32::try_from(i).unwrap(), tx, *txid)?;
       }
 
+      let rune_balances = rune_updater.rune_balances.clone();
+      let rune_transactions = rune_updater.rune_transactions.clone();
+      let address_transactions = rune_updater.address_transactions.clone();
+
       rune_updater.update()?;
+
+      for ((address, rune_id), changes) in rune_balances {
+        if let Ok(amount) = self
+          .index
+          .pg_database
+          .pg_query_rune_balance(rune_id, address.clone())
+        {
+          let init = amount.unwrap_or(0);
+          let amount = changes.iter().fold(init, |acc, change| {
+            if change.0 {
+              acc + change.1
+            } else {
+              acc - change.1
+            }
+          });
+          let _ = self
+            .index
+            .pg_database
+            .pg_update_rune_balance(rune_id, address, amount)
+            .unwrap();
+        }
+      }
+
+      for (txid, rune_id) in rune_transactions {
+        let _ = self
+          .index
+          .pg_database
+          .pg_insert_rune_transaction(rune_id, txid, self.height as u64, block.header.time)
+          .unwrap();
+      }
+
+      for (txid, address) in address_transactions {
+        let _ = self
+          .index
+          .pg_database
+          .pg_insert_address_transaction(address, txid)
+          .unwrap();
+      }
     }
 
     height_to_block_header.insert(&self.height, &block.header.store())?;

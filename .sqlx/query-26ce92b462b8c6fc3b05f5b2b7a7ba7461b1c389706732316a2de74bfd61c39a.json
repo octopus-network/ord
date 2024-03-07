@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n          INSERT INTO public.runes\n          (number, rune_id, spaced_rune, divisibility, symbol, etching, premine, terms_amount, terms_cap, terms_height_start, terms_height_end, terms_offset_start, terms_offset_end, mints, burned, block, timestamp, turbo)\n          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Numeric",
+        "Varchar",
+        "Varchar",
+        "Int2",
+        "Varchar",
+        "Varchar",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "26ce92b462b8c6fc3b05f5b2b7a7ba7461b1c389706732316a2de74bfd61c39a"
+}

@@ -1,6 +1,7 @@
 use super::*;
+use ordinals::{RsTransaction, RsTxIn, RsTxOut};
 
-pub(super) struct RuneUpdater<'a, 'tx, 'client> {
+pub(super) struct RuneUpdater<'a, 'tx, 'client, 'index> {
   pub(super) block_time: u32,
   pub(super) burned: HashMap<RuneId, Lot>,
   pub(super) client: &'client Client,
@@ -14,11 +15,93 @@ pub(super) struct RuneUpdater<'a, 'tx, 'client> {
   pub(super) sequence_number_to_rune_id: &'a mut Table<'tx, u32, RuneIdValue>,
   pub(super) statistic_to_count: &'a mut Table<'tx, u64, u64>,
   pub(super) transaction_id_to_rune: &'a mut Table<'tx, &'static TxidValue, u128>,
+  pub(super) index: &'index Index,
+  pub(super) rs_tx: RsTransaction,
+  /// Stores the balance changes for each rune and address.
+  ///
+  /// The key of the HashMap is a tuple containing an address and a RuneId.
+  /// The value is a vector of tuples, where each tuple represents a balance change.
+  /// The first element of the tuple is a boolean that indicates the type of change:
+  /// - `true` represents an increase in balance.
+  /// - `false` represents a decrease in balance.
+  /// The second element of the tuple is the amount of the change.
+  pub(super) rune_balances: HashMap<(Address, RuneId), Vec<(bool, u128)>>,
+  pub(super) rune_transactions: HashSet<(Txid, RuneId)>,
+  pub(super) address_transactions: HashSet<(Txid, Address)>,
 }
 
-impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
+impl<'a, 'tx, 'client, 'index> RuneUpdater<'a, 'tx, 'client, 'index> {
   pub(super) fn index_runes(&mut self, tx_index: u32, tx: &Transaction, txid: Txid) -> Result<()> {
     let artifact = Runestone::decipher(tx);
+
+    let has_runes = tx.input.iter().any(|input| {
+      self
+        .outpoint_to_balances
+        .get(&input.previous_output.store())
+        .map_or(false, |v| v.is_some())
+    });
+
+    self.rs_tx = RsTransaction::default();
+    if artifact.is_some() || has_runes {
+      for input in tx.input.iter() {
+        if input.previous_output.txid
+          == Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap()
+        {
+          continue;
+        }
+        let prev_output = self
+          .index
+          .get_transaction(input.previous_output.txid)?
+          .unwrap()
+          .output
+          .into_iter()
+          .nth(input.previous_output.vout as usize)
+          .unwrap();
+
+        if let Ok(address) = self
+          .index
+          .settings
+          .chain()
+          .address_from_script(&prev_output.script_pubkey)
+        {
+          let tx_in = RsTxIn {
+            value: Amount::from_sat(prev_output.value),
+            address,
+            runes: vec![],
+          };
+          self.rs_tx.inputs.push(tx_in);
+        } else {
+          log::error!(
+            "Failed to convert script_pubkey to address: {:?}",
+            prev_output.script_pubkey
+          );
+          continue;
+        }
+      }
+      for output in tx.output.iter() {
+        let tx_out = RsTxOut {
+          value: Amount::from_sat(output.value),
+          address: if output.script_pubkey.is_op_return() {
+            None
+          } else {
+            self
+              .index
+              .settings
+              .chain()
+              .address_from_script(&output.script_pubkey)
+              .ok()
+          },
+          op_return: if output.script_pubkey.is_op_return() {
+            artifact.clone()
+          } else {
+            None
+          },
+          runes: vec![],
+        };
+        self.rs_tx.outputs.push(tx_out);
+      }
+    }
 
     let mut unallocated = self.unallocated(tx)?;
 
@@ -168,6 +251,20 @@ impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
       if tx.output[vout].script_pubkey.is_op_return() {
         for (id, balance) in &balances {
           *burned.entry(*id).or_default() += *balance;
+
+          if let Ok(rune_id) = RuneId::try_from(*id) {
+            self
+              .rs_tx
+              .outputs
+              .get_mut(vout)
+              .expect("op_return must exist; QED")
+              .runes
+              .push((rune_id, balance.n()));
+            self.rune_transactions.insert((txid, rune_id));
+          } else {
+            log::warn!("Failed to convert id to RuneId: {}", id);
+            continue;
+          }
         }
         continue;
       }
@@ -179,8 +276,32 @@ impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
       // Sort balances by id so tests can assert balances in a fixed order
       balances.sort();
 
+      if self.rs_tx.outputs[vout].address.is_none() {
+        log::warn!("address is none: txid: {:?}, vout: {:?}", txid, vout);
+        continue;
+      }
+      let address = self.rs_tx.outputs[vout].address.clone().unwrap();
       for (id, balance) in balances {
         Index::encode_rune_balance(id, balance.n(), &mut buffer);
+        if let Ok(rune_id) = RuneId::try_from(id) {
+          self
+            .rune_balances
+            .entry((address.clone(), rune_id))
+            .or_default()
+            .push((true, balance.n()));
+
+          self
+            .rs_tx
+            .outputs
+            .get_mut(vout)
+            .expect("output must exist; QED")
+            .runes
+            .push((rune_id, balance.n()));
+          self.rune_transactions.insert((txid, rune_id));
+        } else {
+          log::warn!("Failed to convert id to RuneId: {}", id);
+          continue;
+        }
       }
 
       self.outpoint_to_balances.insert(
@@ -198,14 +319,42 @@ impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
       *self.burned.entry(id).or_default() += amount;
     }
 
+    if !self.rs_tx.outputs.is_empty() || !self.rs_tx.inputs.is_empty() {
+      if let Err(error) = self
+        .index
+        .pg_database
+        .pg_insert_rs_transaction(txid, &self.rs_tx)
+      {
+        log::error!(
+          "An error occurred INSERT INTO rs_transactions: {} {:?}",
+          error,
+          self.rs_tx
+        );
+      }
+      for output in &self.rs_tx.outputs {
+        if let Some(ref address) = output.address {
+          self.address_transactions.insert((txid, address.clone()));
+        }
+      }
+      for input in &self.rs_tx.inputs {
+        self
+          .address_transactions
+          .insert((txid, input.address.clone()));
+      }
+    }
+
     Ok(())
   }
 
   pub(super) fn update(self) -> Result {
-    for (rune_id, burned) in self.burned {
+    for (rune_id, burned) in &self.burned {
       let mut entry = RuneEntry::load(self.id_to_entry.get(&rune_id.store())?.unwrap().value());
       entry.burned = entry.burned.checked_add(burned.n()).unwrap();
       self.id_to_entry.insert(&rune_id.store(), entry.store())?;
+      let _ = self
+        .index
+        .pg_database
+        .pg_update_rune_burned(*rune_id, entry.burned);
     }
 
     Ok(())
@@ -277,6 +426,9 @@ impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
     };
 
     self.id_to_entry.insert(id.store(), entry.store())?;
+    let _ = self.index.pg_database.pg_insert_rune(id, entry);
+
+    self.rune_transactions.insert((txid, id));
 
     let inscription_id = InscriptionId { txid, index: 0 };
 
@@ -357,6 +509,10 @@ impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
     rune_entry.mints += 1;
 
     self.id_to_entry.insert(&id.store(), rune_entry.store())?;
+    let _ = self
+      .index
+      .pg_database
+      .pg_update_rune_mints(id, rune_entry.mints);
 
     Ok(Some(Lot(amount)))
   }
@@ -433,7 +589,7 @@ impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
     let mut unallocated: HashMap<RuneId, Lot> = HashMap::new();
 
     // increment unallocated runes with the runes in tx inputs
-    for input in &tx.input {
+    for (index, input) in tx.input.iter().enumerate() {
       if let Some(guard) = self
         .outpoint_to_balances
         .remove(&input.previous_output.store())?
@@ -444,6 +600,26 @@ impl<'a, 'tx, 'client> RuneUpdater<'a, 'tx, 'client> {
           let ((id, balance), len) = Index::decode_rune_balance(&buffer[i..]).unwrap();
           i += len;
           *unallocated.entry(id).or_default() += balance;
+          let address = self.rs_tx.inputs[index].address.clone();
+
+          if let Ok(rune_id) = RuneId::try_from(id) {
+            self
+              .rune_balances
+              .entry((address, rune_id))
+              .or_default()
+              .push((false, balance));
+
+            self
+              .rs_tx
+              .inputs
+              .get_mut(index)
+              .expect("input must exist; QED")
+              .runes
+              .push((rune_id, balance));
+          } else {
+            log::warn!("Failed to convert id to RuneId: {}", id);
+            continue;
+          }
         }
       }
     }

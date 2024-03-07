@@ -59,3 +59,5 @@ mod sat_point;
 mod spaced_rune;
 mod terms;
 pub mod varint;
+
+pub use runestone::transaction::{RsTransaction, RsTxIn, RsTxOut};
