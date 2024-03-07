@@ -45,6 +45,7 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
   pub(super) index: &'index Index,
   pub(super) rs_tx: RsTransaction,
   pub(super) rune_balances: HashMap<(Address, RuneId), (u128, u128)>,
+  pub(super) rune_transactions: HashSet<(Txid, RuneId)>,
 }
 
 impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
@@ -53,14 +54,10 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     let runestone = Runestone::from_transaction(tx);
     let has_runes = tx.input.iter().any(|input| {
-      if let Ok(Some(_v)) = self
+      self
         .outpoint_to_balances
         .get(&input.previous_output.store())
-      {
-        true
-      } else {
-        false
-      }
+        .map_or(false, |v| v.is_some())
     });
     if runestone.is_some() || has_runes {
       for input in tx.input.iter() {
@@ -293,6 +290,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
               .expect("op_return must exist; QED")
               .runes
               .push((rune_id, *balance));
+            self.rune_transactions.insert((txid, rune_id));
           } else {
             log::warn!("Failed to convert id to RuneId: {}", id);
             continue;
@@ -326,6 +324,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
             .expect("output must exist; QED")
             .runes
             .push((rune_id, balance));
+          self.rune_transactions.insert((txid, rune_id));
         } else {
           log::warn!("Failed to convert id to RuneId: {}", id);
           continue;
@@ -407,6 +406,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
     self.runtime.block_on(async {
       let _ = self.pg_insert_rune(id, rune_entry).await;
     });
+    self.rune_transactions.insert((txid, id));
 
     let inscription_id = InscriptionId { txid, index: 0 };
 
@@ -564,16 +564,16 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
   pub(crate) async fn pg_insert_rs_transaction(
     &self,
-    tx_id: Txid,
+    txid: Txid,
     rs_tx: RsTransaction,
   ) -> Result<()> {
     let result = sqlx::query!(
       r#"
-          INSERT INTO public.rs_transactions (tx_id, transaction)
+          INSERT INTO public.rs_transactions (txid, transaction)
           VALUES ($1, $2)
-          ON CONFLICT (tx_id) DO NOTHING
+          ON CONFLICT (txid) DO NOTHING
         "#,
-      tx_id.to_string(),
+      txid.to_string(),
       serde_json::to_value(rs_tx)?,
     )
     .execute(self.pg_pool)
@@ -581,7 +581,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     match result {
       Ok(_) => {
-        log::info!("INSERT INTO rs_transactions: {}", tx_id);
+        log::info!("INSERT INTO rs_transactions: {}", txid);
       }
       Err(error) => {
         log::error!("An error occurred INSERT INTO rs_transactions: {}", error);
@@ -788,5 +788,36 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
         Err(error)
       }
     }
+  }
+
+  pub(crate) async fn pg_insert_rune_transaction(
+    pg_pool: &PgPool,
+    rune_id: RuneId,
+    txid: Txid,
+    timestamp: u32,
+  ) -> Result<()> {
+    let result = sqlx::query!(
+      r#"
+          INSERT INTO public.rune_transactions (rune_id, txid, timestamp)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (rune_id, txid) DO NOTHING
+        "#,
+      rune_id.to_string(),
+      txid.to_string(),
+      Utc.timestamp_opt(timestamp as i64, 0).unwrap()
+    )
+    .execute(pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::info!("INSERT INTO rune_transactions: {}", txid);
+      }
+      Err(error) => {
+        log::error!("An error occurred INSERT INTO rune_transactions: {}", error);
+      }
+    }
+
+    Ok(())
   }
 }

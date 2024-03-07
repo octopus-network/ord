@@ -612,6 +612,7 @@ impl<'index> Updater<'index> {
         index: &self.index,
         rs_tx: RsTransaction::default(),
         rune_balances: HashMap::new(),
+        rune_transactions: HashSet::new(),
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
@@ -619,6 +620,7 @@ impl<'index> Updater<'index> {
       }
 
       let rune_balances = rune_updater.rune_balances.clone();
+      let rune_transactions = rune_updater.rune_transactions.clone();
 
       for (rune_id, update) in rune_updater.updates {
         let mut entry = RuneEntry::load(
@@ -646,6 +648,9 @@ impl<'index> Updater<'index> {
       }
 
       for ((address, rune_id), (decrease, increase)) in rune_balances {
+        if decrease == increase {
+          continue;
+        }
         runtime.block_on(async {
            if let Ok(mut amount) = RuneUpdater::pg_query_rune_balance(&pg_pool, rune_id, address.clone()).await {
             if amount >= decrease {
@@ -658,6 +663,15 @@ impl<'index> Updater<'index> {
              .await
              .unwrap();
            }
+        });
+      }
+
+      for (txid, rune_id) in rune_transactions {
+        runtime.block_on(async {
+          let _ =
+            RuneUpdater::pg_insert_rune_transaction(&pg_pool, rune_id, txid, block.header.time)
+              .await
+              .unwrap();
         });
       }
     }
