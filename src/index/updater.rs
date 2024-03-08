@@ -655,31 +655,37 @@ impl<'index> Updater<'index> {
         });
       }
 
-      for ((address, rune_id), (decrease, increase)) in rune_balances {
-        if decrease == increase {
-          continue;
+      runtime.block_on(async {
+        for ((address, rune_id), changes) in rune_balances {
+          if let Ok(amount) =
+            RuneUpdater::pg_query_rune_balance(&pg_pool, rune_id, address.clone()).await
+          {
+            let init = amount.unwrap_or(0);
+            let amount = changes.iter().fold(init, |acc, change| {
+              if change.0 {
+                acc + change.1
+              } else {
+                acc - change.1
+              }
+            });
+            let _ = RuneUpdater::pg_update_rune_balance(&pg_pool, rune_id, address, amount)
+              .await
+              .unwrap();
+          }
         }
-        runtime.block_on(async {
-           if let Ok(mut amount) = RuneUpdater::pg_query_rune_balance(&pg_pool, rune_id, address.clone()).await {
-            if amount >= decrease {
-            amount -= decrease;
-            } else {
-              log::error!("Rune balance is less than decrease amount rune_id: {:?}, address {:?} amount: {:?}, decrease: {:?}", rune_id, address, amount, decrease);
-            }
-            amount += increase;
-           let _ = RuneUpdater::pg_update_rune_balance(&pg_pool, rune_id, address, amount)
-             .await
-             .unwrap();
-           }
-        });
-      }
+      });
 
       for (txid, rune_id) in rune_transactions {
         runtime.block_on(async {
-          let _ =
-            RuneUpdater::pg_insert_rune_transaction(&pg_pool, rune_id, txid, block.header.time)
-              .await
-              .unwrap();
+          let _ = RuneUpdater::pg_insert_rune_transaction(
+            &pg_pool,
+            rune_id,
+            txid,
+            self.height,
+            block.header.time,
+          )
+          .await
+          .unwrap();
         });
       }
     }

@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.rune_balances
 CREATE TABLE IF NOT EXISTS public.rs_transactions
 (
     txid character varying(64) NOT NULL,
-    transaction json,
+    transaction json NOT NULL,
     CONSTRAINT rs_transactions_pkey PRIMARY KEY (txid)
 );
 
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS public.rune_transactions
 (
     rune_id character varying(16) NOT NULL,
     txid character varying(64) NOT NULL,
+    height bigint NOT NULL,
     timestamp timestamp with time zone NOT NULL,
     CONSTRAINT rune_transactions_pkey PRIMARY KEY (rune_id, txid),
     CONSTRAINT rune_transactions_rune_id_fkey FOREIGN KEY (rune_id) REFERENCES public.runes (rune_id),

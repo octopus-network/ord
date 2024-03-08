@@ -44,7 +44,15 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
   pub(super) pg_pool: &'pool PgPool,
   pub(super) index: &'index Index,
   pub(super) rs_tx: RsTransaction,
-  pub(super) rune_balances: HashMap<(Address, RuneId), (u128, u128)>,
+  /// Stores the balance changes for each rune and address.
+  ///
+  /// The key of the HashMap is a tuple containing an address and a RuneId.
+  /// The value is a vector of tuples, where each tuple represents a balance change.
+  /// The first element of the tuple is a boolean that indicates the type of change:
+  /// - `true` represents an increase in balance.
+  /// - `false` represents a decrease in balance.
+  /// The second element of the tuple is the amount of the change.
+  pub(super) rune_balances: HashMap<(Address, RuneId), Vec<(bool, u128)>>,
   pub(super) rune_transactions: HashSet<(Txid, RuneId)>,
 }
 
@@ -59,6 +67,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
         .get(&input.previous_output.store())
         .map_or(false, |v| v.is_some())
     });
+
     if runestone.is_some() || has_runes {
       for input in tx.input.iter() {
         if input.previous_output.txid
@@ -315,7 +324,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
             .rune_balances
             .entry((address.clone(), rune_id))
             .or_default()
-            .1 += balance;
+            .push((true, balance));
 
           self
             .rs_tx
@@ -351,9 +360,16 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
     }
     if !self.rs_tx.outputs.is_empty() || !self.rs_tx.inputs.is_empty() {
       self.runtime.block_on(async {
-        let _ = self
+        if let Err(error) = self
           .pg_insert_rs_transaction(txid, self.rs_tx.clone())
-          .await;
+          .await
+        {
+          log::error!(
+            "An error occurred INSERT INTO rs_transactions: {} {:?}",
+            error,
+            self.rs_tx
+          );
+        }
       });
     }
 
@@ -542,7 +558,11 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
           let address = self.rs_tx.inputs[index].address.clone();
 
           if let Ok(rune_id) = RuneId::try_from(id) {
-            self.rune_balances.entry((address, rune_id)).or_default().0 += balance;
+            self
+              .rune_balances
+              .entry((address, rune_id))
+              .or_default()
+              .push((false, balance));
 
             self
               .rs_tx
@@ -581,7 +601,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     match result {
       Ok(_) => {
-        log::info!("INSERT INTO rs_transactions: {}", txid);
+        log::debug!("INSERT INTO rs_transactions: {}", txid);
       }
       Err(error) => {
         log::error!("An error occurred INSERT INTO rs_transactions: {}", error);
@@ -617,7 +637,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     match result {
       Ok(_) => {
-        log::info!(
+        log::debug!(
           "INSERT INTO public.runes: {},{}",
           rune_id,
           rune_entry.etching
@@ -652,7 +672,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     match result {
       Ok(row) => {
-        log::info!("UPDATE public.runes: {}", rune_id);
+        log::debug!("UPDATE public.runes: {}", rune_id);
         let spaced_rune = SpacedRune::from_str(&row.spaced_rune).unwrap();
         let rune_entry = RuneEntry {
           rune: spaced_rune.rune,
@@ -705,7 +725,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     match result {
       Ok(_) => {
-        log::info!("UPDATE public.runes: {}", rune_id);
+        log::debug!("UPDATE public.runes: {}", rune_id);
       }
       Err(error) => {
         log::error!(
@@ -723,7 +743,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
     pg_pool: &PgPool,
     rune_id: RuneId,
     address: Address,
-  ) -> Result<u128, sqlx::Error> {
+  ) -> Result<Option<u128>, sqlx::Error> {
     let result = sqlx::query!(
       r#"
       SELECT rune_id, address, amount
@@ -733,12 +753,12 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
       rune_id.to_string(),
       address.to_string(),
     )
-    .fetch_one(pg_pool)
+    .fetch_optional(pg_pool)
     .await;
     match result {
       Ok(row) => {
-        log::info!("QUERY public.rune_balances: {}, {}", rune_id, address);
-        return Ok(row.amount.parse().unwrap());
+        log::debug!("QUERY public.rune_balances: {}, {}", rune_id, address);
+        return Ok(row.map(|r| r.amount.parse().unwrap()));
       }
       Err(error) => {
         log::error!(
@@ -747,7 +767,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
           address,
           error
         );
-        return Ok(0);
+        return Err(error);
       }
     }
   }
@@ -775,7 +795,7 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     match result {
       Ok(_) => {
-        log::info!("UPDATE public.rune_balances: {},{}", rune_id, address);
+        log::debug!("UPDATE public.rune_balances: {},{}", rune_id, address);
         Ok(())
       }
       Err(error) => {
@@ -794,16 +814,18 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
     pg_pool: &PgPool,
     rune_id: RuneId,
     txid: Txid,
+    height: u32,
     timestamp: u32,
   ) -> Result<()> {
     let result = sqlx::query!(
       r#"
-          INSERT INTO public.rune_transactions (rune_id, txid, timestamp)
-          VALUES ($1, $2, $3)
+          INSERT INTO public.rune_transactions (rune_id, txid, height, timestamp)
+          VALUES ($1, $2, $3, $4)
           ON CONFLICT (rune_id, txid) DO NOTHING
         "#,
       rune_id.to_string(),
       txid.to_string(),
+      height as i64,
       Utc.timestamp_opt(timestamp as i64, 0).unwrap()
     )
     .execute(pg_pool)
@@ -811,10 +833,15 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
 
     match result {
       Ok(_) => {
-        log::info!("INSERT INTO rune_transactions: {}", txid);
+        log::debug!("INSERT INTO rune_transactions: {}", txid);
       }
       Err(error) => {
-        log::error!("An error occurred INSERT INTO rune_transactions: {}", error);
+        log::error!(
+          "An error occurred INSERT INTO rune_transactions: {}, rune_id: {:?}, txid: {:?}",
+          error,
+          rune_id.to_string(),
+          txid.to_string()
+        );
       }
     }
 

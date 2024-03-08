@@ -62,6 +62,12 @@ impl Runestone {
 
     let Message { mut fields, edicts } = Message::from_integers(&integers);
 
+    for edict in edicts.iter() {
+      if RuneId::try_from(edict.id).is_err() {
+        return Ok(None);
+      }
+    }
+
     let claim = Tag::Claim.take(&mut fields);
 
     let deadline = Tag::Deadline
