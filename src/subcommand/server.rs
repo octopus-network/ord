@@ -42,6 +42,9 @@ use {
   },
 };
 
+use sqlx::postgres::PgPoolOptions;
+use std::env;
+
 mod accept_encoding;
 mod accept_json;
 mod error;
@@ -263,6 +266,7 @@ impl Server {
         .route("/static/*path", get(Self::static_asset))
         .route("/status", get(Self::status))
         .route("/tx/:txid", get(Self::transaction))
+        .route("/api/rest/tx/:txid", get(Self::rs_transaction))
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
         .layer(Extension(settings.clone()))
@@ -838,6 +842,30 @@ impl Server {
         .into_response()
       })
     })
+  }
+
+  // for local testing
+  async fn rs_transaction(Path(txid): Path<Txid>) -> ServerResult<Response> {
+    let database_url = env::var("DATABASE_URL").map_err(|e| anyhow!(e))?;
+    let pg_pool = PgPoolOptions::new()
+      .connect(&database_url)
+      .await
+      .map_err(|e| anyhow!(e))?;
+    let result = sqlx::query!(
+      r#"
+          SELECT transaction FROM public.rs_transactions
+          WHERE txid = $1
+        "#,
+      txid.to_string(),
+    )
+    .fetch_one(&pg_pool)
+    .await
+    .map_err(|e| anyhow!(e))?;
+
+    let transaction_json = serde_json::to_string(&result.transaction).map_err(|e| anyhow!(e))?;
+
+    let body = body::boxed(body::Full::from(transaction_json));
+    Ok(Response::new(body))
   }
 
   async fn metadata(
