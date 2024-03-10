@@ -40,12 +40,24 @@ use {
 };
 
 pub(crate) use server_config::ServerConfig;
+use sqlx::postgres::PgPoolOptions;
+use std::env;
 
 mod accept_encoding;
 mod accept_json;
 mod error;
 pub mod query;
 mod server_config;
+
+#[derive(Serialize, Debug)]
+pub struct IndexerResponse {
+  pub result: IndexerResult,
+}
+
+#[derive(Serialize, Debug)]
+pub struct IndexerResult {
+  pub transaction: serde_json::Value,
+}
 
 enum SpawnConfig {
   Https(AxumAcceptor),
@@ -263,6 +275,7 @@ impl Server {
         .route("/status", get(Self::status))
         .route("/tx/:txid", get(Self::transaction))
         .route("/update", get(Self::update))
+        .route("/api/rest/tx/:txid", get(Self::rs_transaction))
         .fallback(Self::fallback)
         .layer(Extension(index))
         .layer(Extension(server_config.clone()))
@@ -926,6 +939,36 @@ impl Server {
         Ok(StatusCode::NOT_FOUND.into_response())
       }
     })
+  }
+
+  // for local testing
+  async fn rs_transaction(Path(txid): Path<Txid>) -> ServerResult<Response> {
+    let database_url = env::var("DATABASE_URL").map_err(|e| anyhow!(e))?;
+    let pg_pool = PgPoolOptions::new()
+      .connect(&database_url)
+      .await
+      .map_err(|e| anyhow!(e))?;
+    let result = sqlx::query!(
+      r#"
+          SELECT transaction FROM public.transactions
+          WHERE txid = $1
+        "#,
+      txid.to_string(),
+    )
+    .fetch_one(&pg_pool)
+    .await
+    .map_err(|e| anyhow!(e))?;
+
+    let indexer_response = IndexerResponse {
+      result: IndexerResult {
+        transaction: result.transaction,
+      },
+    };
+
+    let transaction_json = serde_json::to_string(&indexer_response).map_err(|e| anyhow!(e))?;
+
+    let body = body::boxed(body::Full::from(transaction_json));
+    Ok(Response::new(body))
   }
 
   async fn metadata(
