@@ -373,6 +373,27 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
       });
     }
 
+    let mut rs_txid_address_set: HashSet<(Txid, Address)> = HashSet::new();
+    for output in &self.rs_tx.outputs {
+      if let Some(ref address) = output.address {
+        rs_txid_address_set.insert((txid, address.clone()));
+      }
+    }
+    for input in &self.rs_tx.inputs {
+      rs_txid_address_set.insert((txid, input.address.clone()));
+    }
+    for (txid, address) in rs_txid_address_set {
+      self.runtime.block_on(async {
+        if let Err(error) = self.pg_insert_rs_address_transaction(txid, address).await {
+          log::error!(
+            "An error occurred INSERT INTO rs_address_transactions: {}, {}",
+            error,
+            txid
+          );
+        }
+      });
+    }
+
     Ok(())
   }
 
@@ -605,6 +626,39 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
       }
       Err(error) => {
         log::error!("An error occurred INSERT INTO rs_transactions: {}", error);
+      }
+    }
+
+    Ok(())
+  }
+
+  pub(crate) async fn pg_insert_rs_address_transaction(
+    &self,
+    txid: Txid,
+    address: Address,
+  ) -> Result<()> {
+    let result = sqlx::query!(
+      r#"
+          INSERT INTO public.rs_address_transactions (txid, address)
+          VALUES ($1, $2)
+        "#,
+      txid.to_string(),
+      address.to_string(),
+    )
+    .execute(self.pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::debug!("INSERT INTO rs_address_transactions: {},{}", txid, address);
+      }
+      Err(error) => {
+        log::error!(
+          "An error occurred INSERT INTO rs_address_transactions: {},{},{}",
+          txid,
+          address,
+          error
+        );
       }
     }
 
