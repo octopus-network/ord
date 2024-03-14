@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n          INSERT INTO public.address_transactions (address, txid)\n          VALUES ($1, $2)\n          ON CONFLICT (address, txid) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "407b032341b1b3be8855b5fdb9a9b017242976eb5edb22841c4e594959dd3c65"
+}

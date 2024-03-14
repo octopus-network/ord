@@ -54,6 +54,7 @@ pub(super) struct RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
   /// The second element of the tuple is the amount of the change.
   pub(super) rune_balances: HashMap<(Address, RuneId), Vec<(bool, u128)>>,
   pub(super) rune_transactions: HashSet<(Txid, RuneId)>,
+  pub(super) address_transactions: HashSet<(Txid, Address)>,
 }
 
 impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
@@ -373,25 +374,15 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
       });
     }
 
-    let mut rs_txid_address_set: HashSet<(Txid, Address)> = HashSet::new();
     for output in &self.rs_tx.outputs {
       if let Some(ref address) = output.address {
-        rs_txid_address_set.insert((txid, address.clone()));
+        self.address_transactions.insert((txid, address.clone()));
       }
     }
     for input in &self.rs_tx.inputs {
-      rs_txid_address_set.insert((txid, input.address.clone()));
-    }
-    for (txid, address) in rs_txid_address_set {
-      self.runtime.block_on(async {
-        if let Err(error) = self.pg_insert_rs_address_transaction(txid, address).await {
-          log::error!(
-            "An error occurred INSERT INTO rs_address_transactions: {}, {}",
-            error,
-            txid
-          );
-        }
-      });
+      self
+        .address_transactions
+        .insert((txid, input.address.clone()));
     }
 
     Ok(())
@@ -632,39 +623,6 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
     Ok(())
   }
 
-  pub(crate) async fn pg_insert_rs_address_transaction(
-    &self,
-    txid: Txid,
-    address: Address,
-  ) -> Result<()> {
-    let result = sqlx::query!(
-      r#"
-          INSERT INTO public.rs_address_transactions (txid, address)
-          VALUES ($1, $2)
-        "#,
-      txid.to_string(),
-      address.to_string(),
-    )
-    .execute(self.pg_pool)
-    .await;
-
-    match result {
-      Ok(_) => {
-        log::debug!("INSERT INTO rs_address_transactions: {},{}", txid, address);
-      }
-      Err(error) => {
-        log::error!(
-          "An error occurred INSERT INTO rs_address_transactions: {},{},{}",
-          txid,
-          address,
-          error
-        );
-      }
-    }
-
-    Ok(())
-  }
-
   pub(crate) async fn pg_insert_rune(&self, rune_id: RuneId, rune_entry: RuneEntry) -> Result<()> {
     let result = sqlx::query!(
       r#"
@@ -895,6 +853,40 @@ impl<'a, 'db, 'tx, 'pool, 'index> RuneUpdater<'a, 'db, 'tx, 'pool, 'index> {
           error,
           rune_id.to_string(),
           txid.to_string()
+        );
+      }
+    }
+
+    Ok(())
+  }
+
+  pub(crate) async fn pg_insert_address_transaction(
+    pg_pool: &PgPool,
+    address: Address,
+    txid: Txid,
+  ) -> Result<()> {
+    let result = sqlx::query!(
+      r#"
+          INSERT INTO public.address_transactions (address, txid)
+          VALUES ($1, $2)
+          ON CONFLICT (address, txid) DO NOTHING
+        "#,
+      txid.to_string(),
+      address.to_string(),
+    )
+    .execute(pg_pool)
+    .await;
+
+    match result {
+      Ok(_) => {
+        log::debug!("INSERT INTO address_transactions: {},{}", txid, address);
+      }
+      Err(error) => {
+        log::error!(
+          "An error occurred INSERT INTO address_transactions: {},{},{}",
+          txid,
+          address,
+          error
         );
       }
     }
