@@ -46,4 +46,11 @@ CREATE TABLE IF NOT EXISTS public.rune_transactions
     CONSTRAINT rune_transactions_txid_fkey FOREIGN KEY (txid) REFERENCES public.rs_transactions (txid)
 );
 
+CREATE TABLE IF NOT EXISTS public.rs_address_transactions
+(
+    id bigserial PRIMARY KEY,
+    txid character varying(64) NOT NULL,
+    address character varying(64) NOT NULL
+);
+
 END;
