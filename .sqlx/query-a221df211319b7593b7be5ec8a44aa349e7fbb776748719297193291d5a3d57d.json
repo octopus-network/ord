@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n          INSERT INTO public.rune_transactions_legacy (rune_id, txid, height, timestamp)\n          VALUES ($1, $2, $3, $4)\n          ON CONFLICT (rune_id, txid) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a221df211319b7593b7be5ec8a44aa349e7fbb776748719297193291d5a3d57d"
+}

@@ -10,9 +10,9 @@ pub(crate) struct Options {
   #[arg(long, help = "Load Bitcoin Core data dir from <BITCOIN_DATA_DIR>.")]
   pub(crate) bitcoin_data_dir: Option<PathBuf>,
   #[arg(long, help = "Authenticate to Bitcoin Core RPC with <RPC_PASS>.")]
-  pub(crate) bitcoin_rpc_pass: Option<String>,
+  pub(crate) bitcoin_rpc_password: Option<String>,
   #[arg(long, help = "Authenticate to Bitcoin Core RPC as <RPC_USER>.")]
-  pub(crate) bitcoin_rpc_user: Option<String>,
+  pub(crate) bitcoin_rpc_username: Option<String>,
   #[arg(
     long = "chain",
     value_enum,
@@ -46,13 +46,20 @@ pub(crate) struct Options {
     long,
     help = "Track location of runes. RUNES ARE IN AN UNFINISHED PRE-ALPHA STATE AND SUBJECT TO CHANGE AT ANY TIME."
   )]
-  pub(crate) index_runes_pre_alpha_i_agree_to_get_rekt: bool,
+  pub(crate) index_runes: bool,
   #[arg(long, help = "Track location of all satoshis.")]
   pub(crate) index_sats: bool,
+  #[arg(
+    long,
+    short,
+    alias = "noindex_inscriptions",
+    help = "Do not index inscriptions."
+  )]
+  pub(crate) no_index_inscriptions: bool,
   #[arg(long, short, help = "Use regtest. Equivalent to `--chain regtest`.")]
   pub(crate) regtest: bool,
   #[arg(long, help = "Connect to Bitcoin Core RPC at <RPC_URL>.")]
-  pub(crate) rpc_url: Option<String>,
+  pub(crate) bitcoin_rpc_url: Option<String>,
   #[arg(long, short, help = "Use signet. Equivalent to `--chain signet`.")]
   pub(crate) signet: bool,
   #[arg(long, short, help = "Use testnet. Equivalent to `--chain testnet`.")]
@@ -87,12 +94,12 @@ impl Options {
   }
 
   pub(crate) fn index_runes(&self) -> bool {
-    self.index_runes_pre_alpha_i_agree_to_get_rekt && self.chain() != Chain::Mainnet
+    self.index_runes
   }
 
-  pub(crate) fn rpc_url(&self) -> String {
-    if let Some(rpc_url) = &self.rpc_url {
-      format!("{rpc_url}/wallet/{}", self.wallet)
+  pub(crate) fn bitcoin_rpc_url(&self) -> String {
+    if let Some(bitcoin_rpc_url) = &self.bitcoin_rpc_url {
+      format!("{bitcoin_rpc_url}/wallet/{}", self.wallet)
     } else {
       format!(
         "127.0.0.1:{}/wallet/{}",
@@ -184,16 +191,16 @@ impl Options {
     let config = self.load_config()?;
 
     let rpc_user = Options::derive_var(
-      self.bitcoin_rpc_user.as_deref(),
-      Some("BITCOIN_RPC_USER"),
-      config.bitcoin_rpc_user.as_deref(),
+      self.bitcoin_rpc_username.as_deref(),
+      Some("BITCOIN_RPC_USERNAME"),
+      config.bitcoin_rpc_username.as_deref(),
       None,
     )?;
 
     let rpc_pass = Options::derive_var(
-      self.bitcoin_rpc_pass.as_deref(),
+      self.bitcoin_rpc_password.as_deref(),
       Some("BITCOIN_RPC_PASS"),
-      config.bitcoin_rpc_pass.as_deref(),
+      config.bitcoin_rpc_password.as_deref(),
       None,
     )?;
 
@@ -206,11 +213,11 @@ impl Options {
   }
 
   pub(crate) fn bitcoin_rpc_client(&self) -> Result<Client> {
-    let rpc_url = self.rpc_url();
+    let bitcoin_rpc_url = self.bitcoin_rpc_url();
 
     let auth = self.auth()?;
 
-    log::info!("Connecting to Bitcoin Core at {}", self.rpc_url());
+    log::info!("Connecting to Bitcoin Core at {}", self.bitcoin_rpc_url());
 
     if let Auth::CookieFile(cookie_file) = &auth {
       log::info!(
@@ -219,8 +226,8 @@ impl Options {
       );
     }
 
-    let client = Client::new(&rpc_url, auth)
-      .with_context(|| format!("failed to connect to Bitcoin Core RPC at {rpc_url}"))?;
+    let client = Client::new(&bitcoin_rpc_url, auth)
+      .with_context(|| format!("failed to connect to Bitcoin Core RPC at {bitcoin_rpc_url}"))?;
 
     let rpc_chain = match client.get_blockchain_info()?.chain.as_str() {
       "main" => Chain::Mainnet,
@@ -295,7 +302,7 @@ mod tests {
       ])
       .unwrap()
       .options
-      .rpc_url(),
+      .bitcoin_rpc_url(),
       "127.0.0.1:1234/wallet/ord"
     );
   }
@@ -322,7 +329,10 @@ mod tests {
   fn use_default_network() {
     let arguments = Arguments::try_parse_from(["ord", "index", "update"]).unwrap();
 
-    assert_eq!(arguments.options.rpc_url(), "127.0.0.1:8332/wallet/ord");
+    assert_eq!(
+      arguments.options.bitcoin_rpc_url(),
+      "127.0.0.1:8332/wallet/ord"
+    );
 
     assert!(arguments
       .options
@@ -336,7 +346,10 @@ mod tests {
     let arguments =
       Arguments::try_parse_from(["ord", "--chain=signet", "index", "update"]).unwrap();
 
-    assert_eq!(arguments.options.rpc_url(), "127.0.0.1:38332/wallet/ord");
+    assert_eq!(
+      arguments.options.bitcoin_rpc_url(),
+      "127.0.0.1:38332/wallet/ord"
+    );
 
     assert!(arguments
       .options
@@ -677,8 +690,8 @@ mod tests {
         .load_config()
         .unwrap(),
       Config {
-        bitcoin_rpc_user: Some("foo".into()),
-        bitcoin_rpc_pass: Some("bar".into()),
+        bitcoin_rpc_username: Some("foo".into()),
+        bitcoin_rpc_password: Some("bar".into()),
         ..Default::default()
       }
     );
@@ -745,7 +758,7 @@ mod tests {
   #[test]
   fn auth_missing_rpc_pass_is_an_error() {
     let options = Options {
-      bitcoin_rpc_user: Some("foo".into()),
+      bitcoin_rpc_username: Some("foo".into()),
       ..Default::default()
     };
     assert_eq!(
@@ -757,7 +770,7 @@ mod tests {
   #[test]
   fn auth_missing_rpc_user_is_an_error() {
     let options = Options {
-      bitcoin_rpc_pass: Some("bar".into()),
+      bitcoin_rpc_password: Some("bar".into()),
       ..Default::default()
     };
     assert_eq!(
@@ -769,8 +782,8 @@ mod tests {
   #[test]
   fn auth_with_user_and_pass() {
     let options = Options {
-      bitcoin_rpc_user: Some("foo".into()),
-      bitcoin_rpc_pass: Some("bar".into()),
+      bitcoin_rpc_username: Some("foo".into()),
+      bitcoin_rpc_password: Some("bar".into()),
       ..Default::default()
     };
     assert_eq!(

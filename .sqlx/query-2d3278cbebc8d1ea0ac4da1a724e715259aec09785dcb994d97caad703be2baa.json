@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n      UPDATE public.runes_legacy\n      SET mints = $2, burned = $3, supply = $4\n      WHERE rune_id = $1\n      ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d3278cbebc8d1ea0ac4da1a724e715259aec09785dcb994d97caad703be2baa"
+}

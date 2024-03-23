@@ -10,7 +10,7 @@ const TAG_TERM: u128 = 6;
 #[allow(unused)]
 const TAG_BURN: u128 = 256;
 
-#[derive(Default, Serialize, Debug, PartialEq)]
+#[derive(Default, Serialize, Debug, PartialEq, Clone)]
 pub struct Runestone {
   pub edicts: Vec<Edict>,
   pub etching: Option<Etching>,
@@ -87,6 +87,7 @@ impl Runestone {
       rune: Rune(rune),
       symbol: fields
         .remove(&TAG_SYMBOL)
+        .filter(|&symbol| symbol != 0)
         .and_then(|symbol| u32::try_from(symbol).ok())
         .and_then(char::from_u32),
       term: fields

@@ -10,7 +10,7 @@ pub(crate) struct TestServer {
   port: u16,
   #[allow(unused)]
   tempdir: TempDir,
-  rpc_url: String,
+  bitcoin_rpc_url: String,
 }
 
 impl TestServer {
@@ -63,7 +63,7 @@ impl TestServer {
       child,
       tempdir,
       port,
-      rpc_url: rpc_server.url(),
+      bitcoin_rpc_url: rpc_server.url(),
     }
   }
 
@@ -98,7 +98,7 @@ impl TestServer {
   }
 
   fn sync_server(&self) {
-    let client = Client::new(&self.rpc_url, Auth::None).unwrap();
+    let client = Client::new(&self.bitcoin_rpc_url, Auth::None).unwrap();
     let chain_block_count = client.get_block_count().unwrap() + 1;
 
     for i in 0.. {

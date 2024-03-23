@@ -15,6 +15,7 @@ mod pile;
 mod rune;
 mod rune_id;
 mod runestone;
+pub mod transaction;
 pub mod varint;
 
 type Result<T, E = Error> = std::result::Result<T, E>;

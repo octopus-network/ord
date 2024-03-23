@@ -2,7 +2,8 @@ use {
   self::{inscription_updater::InscriptionUpdater, rune_updater::RuneUpdater},
   super::{fetcher::Fetcher, *},
   futures::future::try_join_all,
-  std::sync::mpsc,
+  sqlx::postgres::PgPoolOptions,
+  std::{env, sync::mpsc},
   tokio::sync::mpsc::{error::TryRecvError, Receiver, Sender},
 };
 
@@ -56,6 +57,9 @@ impl<'index> Updater<'_> {
   pub(crate) fn update_index(&mut self) -> Result {
     let mut wtx = self.index.begin_write()?;
     let starting_height = self.index.client.get_block_count()? + 1;
+    if self.height == 0 {
+      self.height = 2539948;
+    }
 
     wtx
       .open_table(WRITE_TRANSACTION_STARTING_BLOCK_COUNT_TO_TIMESTAMP)?
@@ -340,6 +344,7 @@ impl<'index> Updater<'_> {
 
     let mut outpoint_to_value = wtx.open_table(OUTPOINT_TO_VALUE)?;
 
+    /*
     let index_inscriptions = self.height >= index.first_inscription_height;
 
     if index_inscriptions {
@@ -375,6 +380,7 @@ impl<'index> Updater<'_> {
         }
       }
     }
+    */
 
     let mut height_to_block_hash = wtx.open_table(HEIGHT_TO_BLOCK_HASH)?;
     let mut height_to_last_sequence_number = wtx.open_table(HEIGHT_TO_LAST_SEQUENCE_NUMBER)?;
@@ -390,6 +396,7 @@ impl<'index> Updater<'_> {
       wtx.open_table(SEQUENCE_NUMBER_TO_INSCRIPTION_ID)?;
     let mut statistic_to_count = wtx.open_table(STATISTIC_TO_COUNT)?;
 
+    /*
     let mut lost_sats = statistic_to_count
       .get(&Statistic::LostSats.key())?
       .map(|lost_sats| lost_sats.value())
@@ -551,6 +558,7 @@ impl<'index> Updater<'_> {
         &inscription_updater.unbound_inscriptions,
       )?;
     }
+    */
 
     if index.index_runes {
       let mut outpoint_to_rune_balances = wtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
@@ -558,6 +566,16 @@ impl<'index> Updater<'_> {
       let mut rune_to_rune_id = wtx.open_table(RUNE_TO_RUNE_ID)?;
       let mut inscription_id_to_rune = wtx.open_table(INSCRIPTION_ID_TO_RUNE)?;
       let mut transaction_id_to_rune = wtx.open_table(TRANSACTION_ID_TO_RUNE)?;
+      let runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+          .enable_all()
+          .build()?,
+      );
+
+      let database_url = env::var("DATABASE_URL")?;
+      let pg_pool =
+        runtime.block_on(async { PgPoolOptions::new().connect(&database_url).await })?;
+
       let mut rune_updater = RuneUpdater::new(
         self.height,
         &mut rune_id_to_rune_entry,
@@ -568,9 +586,58 @@ impl<'index> Updater<'_> {
         &mut statistic_to_count,
         block.header.time,
         &mut transaction_id_to_rune,
+        runtime.clone(),
+        &pg_pool,
+        index,
       )?;
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
         rune_updater.index_runes(i, tx, *txid)?;
+      }
+
+      let rune_balances = rune_updater.rune_balances.clone();
+      let rune_transactions = rune_updater.rune_transactions.clone();
+      let address_transactions = rune_updater.address_transactions.clone();
+
+      runtime.block_on(async {
+        for ((address, rune_id), changes) in rune_balances {
+          if let Ok(amount) =
+            RuneUpdater::pg_query_rune_balance(&pg_pool, rune_id, address.clone()).await
+          {
+            let init = amount.unwrap_or(0);
+            let amount = changes.iter().fold(init, |acc, change| {
+              if change.0 {
+                acc + change.1
+              } else {
+                acc - change.1
+              }
+            });
+            let _ = RuneUpdater::pg_update_rune_balance(&pg_pool, rune_id, address, amount)
+              .await
+              .unwrap();
+          }
+        }
+      });
+
+      for (txid, rune_id) in rune_transactions {
+        runtime.block_on(async {
+          let _ = RuneUpdater::pg_insert_rune_transaction(
+            &pg_pool,
+            rune_id,
+            txid,
+            self.height,
+            block.header.time,
+          )
+          .await
+          .unwrap();
+        });
+      }
+
+      for (txid, address) in address_transactions {
+        runtime.block_on(async {
+          let _ = RuneUpdater::pg_insert_address_transaction(&pg_pool, address, txid)
+            .await
+            .unwrap();
+        });
       }
     }
 

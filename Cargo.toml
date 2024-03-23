@@ -50,7 +50,7 @@ rust-embed = "8.0.0"
 rustls = "0.21.1"
 rustls-acme = { version = "0.7.1", features = ["axum"] }
 serde = { version = "1.0.137", features = ["derive"] }
-serde_json = { version = "1.0.81", features = ["preserve_order"] }
+serde_json = { version = "1.0.81", features = ["preserve_order", "arbitrary_precision"] }
 serde_yaml = "0.9.17"
 sha3 = "0.10.8"
 sysinfo = "0.29.2"
@@ -59,6 +59,8 @@ tokio = { version = "1.17.0", features = ["rt-multi-thread"] }
 tokio-stream = "0.1.9"
 tokio-util = {version = "0.7.3", features = ["compat"] }
 tower-http = { version = "0.4.0", features = ["compression-br", "compression-gzip", "cors", "set-header"] }
+
+sqlx = { version = "0.7", features = [ "runtime-tokio", "tls-rustls", "any", "postgres", "chrono", "json"] }
 
 [dev-dependencies]
 executable-path = "1.0.0"
