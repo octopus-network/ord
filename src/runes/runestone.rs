@@ -153,7 +153,7 @@ impl Runestone {
 
     let mut builder = script::Builder::new()
       .push_opcode(opcodes::all::OP_RETURN)
-      .push_slice(b"RUNE_TEST");
+      .push_slice(b"R");
 
     for chunk in payload.chunks(bitcoin::blockdata::constants::MAX_SCRIPT_ELEMENT_SIZE) {
       let push: &bitcoin::script::PushBytes = chunk.try_into().unwrap();
@@ -171,7 +171,7 @@ impl Runestone {
         continue;
       }
 
-      if instructions.next().transpose()? != Some(Instruction::PushBytes(b"RUNE_TEST".into())) {
+      if instructions.next().transpose()? != Some(Instruction::PushBytes(b"R".into())) {
         continue;
       }
 

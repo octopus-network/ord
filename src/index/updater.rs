@@ -58,7 +58,7 @@ impl<'index> Updater<'_> {
     let mut wtx = self.index.begin_write()?;
     let starting_height = self.index.client.get_block_count()? + 1;
     if self.height == 0 {
-      self.height = 2539948;
+      self.height = 816000;
     }
 
     wtx
