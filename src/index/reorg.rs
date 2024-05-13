@@ -70,9 +70,12 @@ impl Reorg {
     Index::increment_statistic(&wtx, Statistic::Commits, 1)?;
     wtx.commit()?;
 
+    let current_height = index.begin_read()?.block_count()?;
+    index.pg_database.pg_mark_reorg(current_height)?;
+
     log::info!(
       "successfully rolled back database to height {}",
-      index.begin_read()?.block_count()?
+      current_height
     );
 
     Ok(())
