@@ -202,10 +202,6 @@ impl PgDatabase {
     block: u32,
     rune_balances: HashMap<(Address, RuneId), Vec<(bool, u128)>>,
   ) -> Result {
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.rune_balances (rune_id, address, is_increased, amount, block) ",
-    );
-
     let mut balances: HashMap<(Address, RuneId), (bool, u128)> = HashMap::new();
     for ((address, rune_id), changes) in &rune_balances {
       let mut increase_total: u128 = 0;
@@ -229,38 +225,49 @@ impl PgDatabase {
       return Ok(());
     }
 
-    query_builder.push_values(balances, |mut b, value| {
-      let rune_id = value.0 .1;
-      let address = value.0 .0;
-      let is_increased = value.1 .0;
-      let amount = value.1 .1;
+    if balances.len() > 10000 {
+      log::warn!("There are too many({}) rune balances to insert at block {}, so we will insert them in batches.", balances.len(), block);
+    }
 
-      b.push_bind(rune_id.to_string())
-        .push_bind(address.to_string())
-        .push_bind(is_increased)
-        .push_bind(BigDecimal::from(amount))
-        .push_bind(BigDecimal::from(block));
-    });
+    let keys: Vec<_> = balances.keys().cloned().collect();
+    let chunks = keys.chunks(10000);
 
-    let query = query_builder.build();
-    let sql = query.sql();
+    for chunk in chunks {
+      let mut query_builder = QueryBuilder::new(
+        "INSERT INTO public.rune_balances (rune_id, address, is_increased, amount, block) ",
+      );
+      query_builder.push_values(chunk, |mut b, value| {
+        let rune_id = value.1;
+        let address = value.0.clone();
+        let is_increased = balances.get(&value).unwrap().0;
+        let amount = balances.get(&value).unwrap().1;
 
-    self.runtime.block_on(async {
-      let result = query.execute(&self.pg_pool).await;
+        b.push_bind(rune_id.to_string())
+          .push_bind(address.to_string())
+          .push_bind(is_increased)
+          .push_bind(BigDecimal::from(amount))
+          .push_bind(BigDecimal::from(block));
+      });
 
-      match result {
-        Ok(_) => {}
-        Err(error) => {
-          log::error!(
-            "An error occurred INSERT public.rune_balances: {}, sql: {}",
-            error,
-            sql
-          );
+      let query = query_builder.build();
+      let sql = query.sql();
+
+      self.runtime.block_on(async {
+        let result = query.execute(&self.pg_pool).await;
+
+        match result {
+          Ok(_) => {}
+          Err(error) => {
+            log::error!(
+              "An error occurred INSERT public.rune_balances: {}, sql: {}",
+              error,
+              sql
+            );
+          }
         }
-      }
-
-      Ok(())
-    })
+      });
+    }
+    Ok(())
   }
 
   pub fn pg_insert_rune_transactions(
