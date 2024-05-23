@@ -226,7 +226,7 @@ impl PgDatabase {
     }
 
     if balances.len() > 10000 {
-      log::warn!("There are too many({}) rune balances to insert at block {}, so we will insert them in batches.", balances.len(), block);
+      log::warn!("There are too many({}) rune_balance to insert at block {}, so we will insert them in batches.", balances.len(), block);
     }
 
     let keys: Vec<_> = balances.keys().cloned().collect();
@@ -320,35 +320,42 @@ impl PgDatabase {
     if address_transactions.is_empty() {
       return Ok(());
     }
-    let mut query_builder =
-      QueryBuilder::new("INSERT INTO public.address_transactions (address, txid, block) ");
+    if address_transactions.len() > 10000 {
+      log::warn!("There are too many({}) address_transaction to insert at block {}, so we will insert them in batches.", address_transactions.len(), block);
+    }
+    let ats: Vec<_> = address_transactions.into_iter().collect();
+    let chunks = ats.chunks(10000);
 
-    query_builder.push_values(address_transactions, |mut b, at| {
-      let txid = at.0;
-      let address = at.1;
+    for chunk in chunks {
+      let mut query_builder =
+        QueryBuilder::new("INSERT INTO public.address_transactions (address, txid, block) ");
 
-      b.push_bind(address.to_string())
-        .push_bind(txid.to_string())
-        .push_bind(BigDecimal::from(block));
-    });
+      query_builder.push_values(chunk, |mut b, at| {
+        let txid = at.0;
+        let address = at.1.clone();
 
-    let query = query_builder.build();
+        b.push_bind(address.to_string())
+          .push_bind(txid.to_string())
+          .push_bind(BigDecimal::from(block));
+      });
 
-    self.runtime.block_on(async {
-      let result = query.execute(&self.pg_pool).await;
+      let query = query_builder.build();
 
-      match result {
-        Ok(_) => {}
-        Err(error) => {
-          log::error!(
-            "An error occurred INSERT INTO address_transactions: {}",
-            error
-          );
+      self.runtime.block_on(async {
+        let result = query.execute(&self.pg_pool).await;
+
+        match result {
+          Ok(_) => {}
+          Err(error) => {
+            log::error!(
+              "An error occurred INSERT INTO address_transactions: {}",
+              error
+            );
+          }
         }
-      }
-
-      Ok(())
-    })
+      });
+    }
+    Ok(())
   }
 
   pub fn pg_mark_reorg(&self, block: u32) -> Result {
