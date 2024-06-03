@@ -279,37 +279,47 @@ impl PgDatabase {
     if rune_transactions.is_empty() {
       return Ok(());
     }
-    let mut query_builder =
+
+    if rune_transactions.len() > 5000 {
+      log::warn!("There are too many({}) rune_transactions to insert at block {}, so we will insert them in batches.", rune_transactions.len(), block);
+    }
+
+    let keys: Vec<_> = rune_transactions.keys().cloned().collect();
+    let chunks = keys.chunks(5000);
+
+    for chunk in chunks {
+      let mut query_builder =
       QueryBuilder::new("INSERT INTO public.rune_transactions (rune_id, txid, burn, etch, mint, transfer, block, timestamp) ");
 
-    query_builder.push_values(rune_transactions, |mut b, rt| {
-      let txid = rt.0 .0;
-      let rune_id = rt.0 .1;
-      let tags = rt.1;
+      query_builder.push_values(chunk, |mut b, rt| {
+        let txid = rt.0;
+        let rune_id = rt.1;
+        let tags = rune_transactions.get(&rt).unwrap();
 
-      b.push_bind(rune_id.to_string())
-        .push_bind(txid.to_string())
-        .push_bind(tags.burn)
-        .push_bind(tags.etch)
-        .push_bind(tags.mint)
-        .push_bind(tags.transfer)
-        .push_bind(BigDecimal::from(block))
-        .push_bind(OffsetDateTime::from_unix_timestamp(timestamp as i64).unwrap());
-    });
+        b.push_bind(rune_id.to_string())
+          .push_bind(txid.to_string())
+          .push_bind(tags.burn)
+          .push_bind(tags.etch)
+          .push_bind(tags.mint)
+          .push_bind(tags.transfer)
+          .push_bind(BigDecimal::from(block))
+          .push_bind(OffsetDateTime::from_unix_timestamp(timestamp as i64).unwrap());
+      });
 
-    let query = query_builder.build();
+      let query = query_builder.build();
 
-    self.runtime.block_on(async {
-      let result = query.execute(&self.pg_pool).await;
-      match result {
-        Ok(_) => {}
-        Err(error) => {
-          log::error!("An error occurred INSERT INTO rune_transactions: {}", error,);
+      self.runtime.block_on(async {
+        let result = query.execute(&self.pg_pool).await;
+        match result {
+          Ok(_) => {}
+          Err(error) => {
+            log::error!("An error occurred INSERT INTO rune_transactions: {}", error,);
+          }
         }
-      }
+      });
+    }
 
-      Ok(())
-    })
+    Ok(())
   }
 
   pub fn pg_insert_address_transactions(
