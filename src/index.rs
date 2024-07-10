@@ -1,3 +1,4 @@
+use pg::PgDatabase;
 use {
   self::{
     entry::{
@@ -40,7 +41,7 @@ pub use self::entry::RuneEntry;
 pub(crate) mod entry;
 pub mod event;
 mod fetcher;
-mod lot;
+pub mod lot;
 mod reorg;
 mod rtx;
 mod updater;
@@ -200,6 +201,7 @@ pub struct Index {
   settings: Settings,
   started: DateTime<Utc>,
   unrecoverably_reorged: AtomicBool,
+  pg_database: PgDatabase,
 }
 
 impl Index {
@@ -211,6 +213,7 @@ impl Index {
     settings: &Settings,
     event_sender: Option<tokio::sync::mpsc::Sender<Event>>,
   ) -> Result<Self> {
+    let pg_database = PgDatabase::new();
     let client = settings.bitcoin_rpc_client(None)?;
 
     let path = settings.index().to_owned();
@@ -371,32 +374,33 @@ impl Index {
 
           Self::set_statistic(&mut statistics, Statistic::Runes, 1)?;
 
-          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?.insert(
-            id.store(),
-            RuneEntry {
-              block: id.block,
-              burned: 0,
-              divisibility: 0,
-              etching,
-              terms: Some(Terms {
-                amount: Some(1),
-                cap: Some(u128::MAX),
-                height: (
-                  Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
-                  Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
-                ),
-                offset: (None, None),
-              }),
-              mints: 0,
-              number: 0,
-              premine: 0,
-              spaced_rune: SpacedRune { rune, spacers: 128 },
-              symbol: Some('\u{29C9}'),
-              timestamp: 0,
-              turbo: true,
-            }
-            .store(),
-          )?;
+          let entry = RuneEntry {
+            block: id.block,
+            burned: 0,
+            divisibility: 0,
+            etching,
+            terms: Some(Terms {
+              amount: Some(1),
+              cap: Some(u128::MAX),
+              height: (
+                Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
+                Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
+              ),
+              offset: (None, None),
+            }),
+            mints: 0,
+            number: 0,
+            premine: 0,
+            spaced_rune: SpacedRune { rune, spacers: 128 },
+            symbol: Some('\u{29C9}'),
+            timestamp: 0,
+            turbo: true,
+          };
+
+          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?
+            .insert(id.store(), entry.store())?;
+          let runes = HashMap::from_iter([(id, entry)]);
+          let _ = pg_database.pg_insert_runes(runes);
 
           tx.open_table(TRANSACTION_ID_TO_RUNE)?
             .insert(&etching.store(), rune.store())?;
@@ -446,6 +450,7 @@ impl Index {
       path,
       started: Utc::now(),
       unrecoverably_reorged: AtomicBool::new(false),
+      pg_database,
     })
   }
 
