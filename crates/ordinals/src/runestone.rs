@@ -3,8 +3,9 @@ use {super::*, flag::Flag, message::Message, tag::Tag};
 mod flag;
 mod message;
 mod tag;
+pub mod transaction;
 
-#[derive(Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Runestone {
   pub edicts: Vec<Edict>,
   pub etching: Option<Etching>,
@@ -62,9 +63,11 @@ impl Runestone {
         let spacers = u32::try_from(spacers).ok()?;
         (spacers <= Etching::MAX_SPACERS).then_some(spacers)
       }),
-      symbol: Tag::Symbol.take(&mut fields, |[symbol]| {
-        char::from_u32(u32::try_from(symbol).ok()?)
-      }),
+      symbol: Tag::Symbol
+        .take(&mut fields, |[symbol]| {
+          char::from_u32(u32::try_from(symbol).ok()?)
+        })
+        .filter(|&symbol| symbol != '\0'),
       terms: Flag::Terms.take(&mut flags).then(|| Terms {
         cap: Tag::Cap.take(&mut fields, |[cap]| Some(cap)),
         height: (
