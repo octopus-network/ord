@@ -10,6 +10,7 @@ pub struct RsTransaction {
 
 #[derive(Serialize, Debug, Clone)]
 pub struct RsTxIn {
+  pub previous_output: String,
   #[serde(with = "bitcoin::amount::serde::as_btc")]
   pub value: Amount,
   pub address: Address,

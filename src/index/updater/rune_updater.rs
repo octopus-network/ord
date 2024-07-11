@@ -57,6 +57,11 @@ impl<'a, 'tx, 'client, 'index> RuneUpdater<'a, 'tx, 'client, 'index> {
           .address_from_script(&prev_output.script_pubkey)
         {
           let tx_in = RsTxIn {
+            previous_output: format!(
+              "{}:{}",
+              input.previous_output.txid.to_string(),
+              input.previous_output.vout
+            ),
             value: Amount::from_sat(prev_output.value),
             address,
             runes: vec![],
