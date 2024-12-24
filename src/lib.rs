@@ -252,7 +252,9 @@ fn gracefully_shut_down_indexer() {
 }
 
 pub fn main() {
-  env_logger::init();
+  env_logger::Builder::from_default_env()
+    .filter_level(log::LevelFilter::Debug)
+    .init();
 
   ctrlc::set_handler(move || {
     if SHUTTING_DOWN.fetch_or(true, atomic::Ordering::Relaxed) {

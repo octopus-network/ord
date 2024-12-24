@@ -2907,6 +2907,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7c2a94325f9c5826b17c42af11067230f503747f870117a28180e85696e21ba"
 dependencies = [
  "libc",
+ "log",
 ]
 
 [[package]]
