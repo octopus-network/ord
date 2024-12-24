@@ -467,6 +467,10 @@ impl RuneUpdater<'_, '_, '_> {
       }
     }
 
+    println!(
+      "julian-debug: tx_commits_to_rune: false: height:{}, rune: {}",
+      self.height, rune
+    );
     Ok(false)
   }
 
