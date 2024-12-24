@@ -678,7 +678,10 @@ impl Index {
                 .store(true, atomic::Ordering::Relaxed);
               return Err(anyhow!(reorg::Error::Unrecoverable));
             }
-            _ => return Err(err),
+            _ => {
+              println!("julian-debug: update_index error: {:?}", err);
+              return Err(err);
+            }
           };
         }
       }

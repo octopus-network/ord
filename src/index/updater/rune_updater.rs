@@ -41,7 +41,11 @@ impl RuneUpdater<'_, '_, '_> {
         }
       }
 
-      let etched = self.etched(tx_index, tx, artifact)?;
+      let res = self.etched(tx_index, tx, artifact);
+      if let Err(ref e) = res {
+        println!("julian-debug: etched error: {:?}", e);
+      }
+      let etched = res?;
 
       if let Artifact::Runestone(runestone) = artifact {
         if let Some((id, ..)) = etched {

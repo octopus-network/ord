@@ -819,7 +819,7 @@ impl Updater<'_> {
     utxo_cache: HashMap<OutPoint, UtxoEntryBuf>,
   ) -> Result {
     log::info!(
-      "Committing at block height {}, {} outputs traversed, {} in map, {} cached",
+      "julian-debug: Committing at block height {}, {} outputs traversed, {} in map, {} cached",
       self.height,
       self.outputs_traversed,
       utxo_cache.len(),
