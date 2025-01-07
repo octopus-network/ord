@@ -1001,13 +1001,14 @@ impl Index {
     Ok((entries, more))
   }
 
-  pub fn encode_rune_balance(id: RuneId, balance: u128, buffer: &mut Vec<u8>) {
+  pub fn encode_rune_balance(id: RuneId, balance: u128, height: u128, buffer: &mut Vec<u8>) {
     varint::encode_to_vec(id.block.into(), buffer);
     varint::encode_to_vec(id.tx.into(), buffer);
     varint::encode_to_vec(balance, buffer);
+    varint::encode_to_vec(height, buffer);
   }
 
-  pub fn decode_rune_balance(buffer: &[u8]) -> Result<((RuneId, u128), usize)> {
+  pub fn decode_rune_balance(buffer: &[u8]) -> Result<((RuneId, u128, u128), usize)> {
     let mut len = 0;
     let (block, block_len) = varint::decode(&buffer[len..])?;
     len += block_len;
@@ -1019,7 +1020,9 @@ impl Index {
     };
     let (balance, balance_len) = varint::decode(&buffer[len..])?;
     len += balance_len;
-    Ok(((id, balance), len))
+    let (height, height_len) = varint::decode(&buffer[len..])?;
+    len += height_len;
+    Ok(((id, balance, height), len))
   }
 
   pub fn get_rune_balances_for_output(
@@ -1045,7 +1048,7 @@ impl Index {
     let mut balances = BTreeMap::new();
     let mut i = 0;
     while i < balances_buffer.len() {
-      let ((id, amount), length) = Index::decode_rune_balance(&balances_buffer[i..]).unwrap();
+      let ((id, amount, _), length) = Index::decode_rune_balance(&balances_buffer[i..]).unwrap();
       i += length;
 
       let entry = RuneEntry::load(id_to_rune_entries.get(id.store())?.unwrap().value());
@@ -1134,7 +1137,7 @@ impl Index {
       let mut balances = Vec::new();
       let mut i = 0;
       while i < balances_buffer.len() {
-        let ((id, balance), length) = Index::decode_rune_balance(&balances_buffer[i..]).unwrap();
+        let ((id, balance, _), length) = Index::decode_rune_balance(&balances_buffer[i..]).unwrap();
         i += length;
         balances.push((id, balance));
       }
