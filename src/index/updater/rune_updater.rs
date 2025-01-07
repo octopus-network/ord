@@ -196,7 +196,7 @@ impl RuneUpdater<'_, '_, '_> {
       };
 
       for (id, balance) in balances {
-        Index::encode_rune_balance(id, balance.n(), &mut buffer);
+        Index::encode_rune_balance(id, balance.n(), self.height.into(), &mut buffer);
 
         if let Some(sender) = self.event_sender {
           sender.blocking_send(Event::RuneTransferred {
@@ -479,7 +479,7 @@ impl RuneUpdater<'_, '_, '_> {
         let buffer = guard.value();
         let mut i = 0;
         while i < buffer.len() {
-          let ((id, balance), len) = Index::decode_rune_balance(&buffer[i..]).unwrap();
+          let ((id, balance, _), len) = Index::decode_rune_balance(&buffer[i..]).unwrap();
           i += len;
           *unallocated.entry(id).or_default() += balance;
         }
