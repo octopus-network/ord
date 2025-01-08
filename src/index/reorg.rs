@@ -95,9 +95,9 @@ impl Reorg {
 
     let blocks = index.client.get_blockchain_info()?.headers;
 
-    if (height < SAVEPOINT_INTERVAL.into()
-      || height.saturating_sub(last_savepoint_height) >= SAVEPOINT_INTERVAL.into())
-      && blocks.saturating_sub(height) <= CHAIN_TIP_DISTANCE.into()
+    if (height < u64::from(SAVEPOINT_INTERVAL)
+      || height.saturating_sub(last_savepoint_height) >= u64::from(SAVEPOINT_INTERVAL))
+      && blocks.saturating_sub(height) <= u64::from(CHAIN_TIP_DISTANCE)
     {
       let wtx = index.begin_write()?;
 
