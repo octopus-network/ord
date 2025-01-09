@@ -361,6 +361,19 @@ impl Updater<'_> {
         .map(|x| x.value())
         .unwrap_or(0);
 
+      let reserved_runes = statistic_to_count
+        .get(&Statistic::ReservedRunes.into())?
+        .map(|x| x.value())
+        .unwrap_or(0);
+
+      log::info!(
+        "height: {}, reserved_runes: {}, runes: {}, outpoint_to_rune_balances: {}",
+        self.height,
+        reserved_runes,
+        runes,
+        outpoint_to_rune_balances.len()?
+      );
+
       let mut rune_updater = RuneUpdater {
         event_sender: self.index.event_sender.as_ref(),
         block_time: block.header.time,
