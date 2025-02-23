@@ -2,6 +2,7 @@ use {
   self::{inscription_updater::InscriptionUpdater, rune_updater::RuneUpdater},
   super::{fetcher::Fetcher, *},
   futures::future::try_join_all,
+  pg::RsUpdates,
   tokio::sync::{
     broadcast::{self, error::TryRecvError},
     mpsc::{self},
@@ -361,6 +362,21 @@ impl Updater<'_> {
         .map(|x| x.value())
         .unwrap_or(0);
 
+      if self.height % 10 == 0 {
+        let reserved_runes = statistic_to_count
+          .get(&Statistic::ReservedRunes.into())?
+          .map(|x| x.value())
+          .unwrap_or(0);
+
+        log::info!(
+          "height: {}, reserved_runes: {}, runes: {}, outpoint_to_rune_balances: {}",
+          self.height,
+          reserved_runes,
+          runes,
+          outpoint_to_rune_balances.len()?
+        );
+      }
+
       let mut rune_updater = RuneUpdater {
         event_sender: self.index.event_sender.as_ref(),
         block_time: block.header.time,
@@ -379,6 +395,8 @@ impl Updater<'_> {
         sequence_number_to_rune_id: &mut sequence_number_to_rune_id,
         statistic_to_count: &mut statistic_to_count,
         transaction_id_to_rune: &mut transaction_id_to_rune,
+        index: &self.index,
+        rs_updates: RsUpdates::default(),
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {

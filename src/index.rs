@@ -1,3 +1,4 @@
+use pg::PgDatabase;
 use {
   self::{
     entry::{
@@ -209,6 +210,7 @@ pub struct Index {
   started: DateTime<Utc>,
   first_index_height: u32,
   unrecoverably_reorged: AtomicBool,
+  pg_database: PgDatabase,
 }
 
 impl Index {
@@ -220,6 +222,7 @@ impl Index {
     settings: &Settings,
     event_sender: Option<tokio::sync::mpsc::Sender<Event>>,
   ) -> Result<Self> {
+    let pg_database = PgDatabase::new();
     let client = settings.bitcoin_rpc_client(None)?;
 
     let path = settings.index().to_owned();
@@ -374,32 +377,34 @@ impl Index {
 
           Self::set_statistic(&mut statistics, Statistic::Runes, 1)?;
 
-          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?.insert(
-            id.store(),
-            RuneEntry {
-              block: id.block,
-              burned: 0,
-              divisibility: 0,
-              etching,
-              terms: Some(Terms {
-                amount: Some(1),
-                cap: Some(u128::MAX),
-                height: (
-                  Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
-                  Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
-                ),
-                offset: (None, None),
-              }),
-              mints: 0,
-              number: 0,
-              premine: 0,
-              spaced_rune: SpacedRune { rune, spacers: 128 },
-              symbol: Some('\u{29C9}'),
-              timestamp: 0,
-              turbo: true,
-            }
-            .store(),
-          )?;
+          let entry = RuneEntry {
+            block: id.block,
+            burned: 0,
+            divisibility: 0,
+            etching,
+            terms: Some(Terms {
+              amount: Some(1),
+              cap: Some(u128::MAX),
+              height: (
+                Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
+                Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
+              ),
+              offset: (None, None),
+            }),
+            mints: 0,
+            number: 0,
+            premine: 0,
+            spaced_rune: SpacedRune { rune, spacers: 128 },
+            symbol: Some('\u{29C9}'),
+            timestamp: 0,
+            turbo: true,
+          };
+
+          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?
+            .insert(id.store(), entry.store())?;
+
+          let runes = HashMap::from_iter([(id, entry)]);
+          let _ = pg_database.pg_insert_runes(runes);
 
           tx.open_table(TRANSACTION_ID_TO_RUNE)?
             .insert(&etching.store(), rune.store())?;
@@ -459,6 +464,7 @@ impl Index {
       path,
       started: Utc::now(),
       unrecoverably_reorged: AtomicBool::new(false),
+      pg_database,
     })
   }
 
@@ -2454,6 +2460,56 @@ impl Index {
       ),
       txout,
     )))
+  }
+
+  pub fn update_runes(&self, updated_runes: HashSet<RuneId>) -> Result {
+    let rtx = self.database.begin_read()?;
+    let id_to_rune_entries = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
+
+    let runes: Vec<_> = updated_runes
+      .clone()
+      .into_iter()
+      .filter_map(|rune_id| {
+        id_to_rune_entries.get(&rune_id.store()).ok()?.map(|entry| {
+          let entry = RuneEntry::load(entry.value());
+          (rune_id, entry.burned, entry.mints)
+        })
+      })
+      .collect();
+
+    if !runes.is_empty() {
+      self.pg_database.pg_update_runes_chunked(runes, 1000)?;
+    }
+
+    Ok(())
+  }
+
+  pub fn update_addresses(&self, updated_addresses: HashSet<Address>) -> Result {
+    let rtx = self.database.begin_read()?;
+    let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
+
+    let mut addresses = Vec::new();
+    for address in updated_addresses.clone() {
+      let outputs = self.get_address_info(&address)?;
+      let runes_balances = self.get_aggregated_rune_balances_for_outputs(&outputs)?;
+      if let Some(runes_balances) = runes_balances {
+        for rune_balance in runes_balances {
+          let rune_id = RuneId::load(
+            rune_to_rune_id
+              .get(&rune_balance.0.rune.store())?
+              .unwrap()
+              .value(),
+          );
+          addresses.push((address.clone(), rune_id, rune_balance.1.value));
+        }
+      }
+    }
+
+    self
+      .pg_database
+      .pg_upsert_address_rune_balances_chunked(addresses, 1000)?;
+
+    Ok(())
   }
 }
 
