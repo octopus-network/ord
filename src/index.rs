@@ -1,4 +1,6 @@
 use pg::PgDatabase;
+use pg::RsUpdates;
+use redb::ReadOnlyMultimapTable;
 use {
   self::{
     entry::{
@@ -672,6 +674,7 @@ impl Index {
         outputs_cached: 0,
         outputs_traversed: 0,
         sat_ranges_since_flush: 0,
+        rs_updates: RsUpdates::default(),
       };
 
       match updater.update_index(wtx) {
@@ -2464,7 +2467,7 @@ impl Index {
 
   pub fn update_runes(
     &self,
-    id_to_entry: &mut Table<RuneIdValue, RuneEntryValue>,
+    id_to_entry: &ReadOnlyTable<RuneIdValue, RuneEntryValue>,
     updated_runes: HashSet<RuneId>,
   ) -> Result {
     let runes: Vec<_> = updated_runes
@@ -2487,8 +2490,8 @@ impl Index {
 
   pub fn update_addresses(
     &self,
-    script_pubkey_to_outpoint: &mut MultimapTable<&[u8], OutPointValue>,
-    outpoint_to_rune_balances: &mut Table<&OutPointValue, &[u8]>,
+    script_pubkey_to_outpoint: &ReadOnlyMultimapTable<&[u8], OutPointValue>,
+    outpoint_to_rune_balances: &ReadOnlyTable<&OutPointValue, &[u8]>,
     updated_addresses: HashSet<Address>,
   ) -> Result {
     let mut addresses = Vec::new();

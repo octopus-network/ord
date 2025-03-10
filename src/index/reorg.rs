@@ -85,15 +85,15 @@ impl Reorg {
       current_height
     );
 
-    let wtx = index.begin_write()?;
-    let mut rune_id_to_rune_entry = wtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
-    let mut outpoint_to_rune_balances = wtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
-    let mut script_pubkey_to_outpoint = wtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
+    let rtx = index.database.begin_read()?;
+    let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
+    let outpoint_to_rune_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
+    let script_pubkey_to_outpoint = rtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
 
-    index.update_runes(&mut rune_id_to_rune_entry, runes)?;
+    index.update_runes(&rune_id_to_rune_entry, runes)?;
     index.update_addresses(
-      &mut script_pubkey_to_outpoint,
-      &mut outpoint_to_rune_balances,
+      &script_pubkey_to_outpoint,
+      &outpoint_to_rune_balances,
       addresses,
     )?;
     index.pg_database.pg_mark_reorg(current_height)?;
