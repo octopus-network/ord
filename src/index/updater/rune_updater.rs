@@ -18,6 +18,7 @@ pub(super) struct RuneUpdater<'a, 'tx, 'client, 'index> {
   pub(super) transaction_id_to_rune: &'a mut Table<'tx, &'static TxidValue, u128>,
   pub(super) index: &'index Index,
   pub(super) rs_updates: RsUpdates,
+  pub(super) script_pubkey_to_outpoint: &'a mut MultimapTable<'tx, &'static [u8], OutPointValue>,
 }
 
 impl RuneUpdater<'_, '_, '_, '_> {
@@ -377,26 +378,28 @@ impl RuneUpdater<'_, '_, '_, '_> {
       self.rs_updates.updated_runes.insert(rune_id);
     }
 
+    self.index.begin_write()?.commit()?;
+
     // insert runes
     self
       .index
       .pg_database
-      .pg_insert_runes_chunked(self.rs_updates.runes.clone(), 1000)?;
+      .pg_insert_runes_chunked(self.rs_updates.runes.clone(), 2000)?;
 
     self
       .index
-      .update_runes(self.rs_updates.updated_runes.clone())?;
+      .update_runes(self.id_to_entry, self.rs_updates.updated_runes.clone())?;
     self.index.pg_database.pg_insert_updated_runes_chunked(
       self.height,
       self.rs_updates.updated_runes.clone(),
-      1000,
+      2000,
     )?;
 
     // insert transactions
     self.index.pg_database.pg_insert_transactions_chunked(
       self.height,
       self.rs_updates.transactions.clone(),
-      1000,
+      2000,
     )?;
 
     // insert rune_transactions
@@ -404,7 +407,7 @@ impl RuneUpdater<'_, '_, '_, '_> {
       self.rs_updates.rune_transactions.clone(),
       self.height as u64,
       self.block_time,
-      1000,
+      2000,
     )?;
 
     // insert address_transactions
@@ -414,16 +417,18 @@ impl RuneUpdater<'_, '_, '_, '_> {
       .pg_insert_address_transactions_chunked(
         self.height,
         self.rs_updates.address_transactions.clone(),
-        1000,
+        2000,
       )?;
 
-    self
-      .index
-      .update_addresses(self.rs_updates.updated_addresses.clone())?;
+    self.index.update_addresses(
+      self.script_pubkey_to_outpoint,
+      self.outpoint_to_balances,
+      self.rs_updates.updated_addresses.clone(),
+    )?;
     self.index.pg_database.pg_insert_updated_addresses_chunked(
       self.height,
       self.rs_updates.updated_addresses.clone(),
-      1000,
+      2000,
     )?;
 
     Ok(())

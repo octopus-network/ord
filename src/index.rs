@@ -436,7 +436,7 @@ impl Index {
     let genesis_block_coinbase_transaction =
       settings.chain().genesis_block().coinbase().unwrap().clone();
 
-    let first_index_height = if index_sats || index_addresses {
+    let first_index_height = if index_sats {
       0
     } else if index_inscriptions {
       settings.first_inscription_height()
@@ -2462,15 +2462,16 @@ impl Index {
     )))
   }
 
-  pub fn update_runes(&self, updated_runes: HashSet<RuneId>) -> Result {
-    let rtx = self.database.begin_read()?;
-    let id_to_rune_entries = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
-
+  pub fn update_runes(
+    &self,
+    id_to_entry: &mut Table<RuneIdValue, RuneEntryValue>,
+    updated_runes: HashSet<RuneId>,
+  ) -> Result {
     let runes: Vec<_> = updated_runes
       .clone()
       .into_iter()
       .filter_map(|rune_id| {
-        id_to_rune_entries.get(&rune_id.store()).ok()?.map(|entry| {
+        id_to_entry.get(&rune_id.store()).ok()?.map(|entry| {
           let entry = RuneEntry::load(entry.value());
           (rune_id, entry.burned, entry.mints)
         })
@@ -2478,37 +2479,67 @@ impl Index {
       .collect();
 
     if !runes.is_empty() {
-      self.pg_database.pg_update_runes_chunked(runes, 1000)?;
+      self.pg_database.pg_update_runes_chunked(runes, 2000)?;
     }
 
     Ok(())
   }
 
-  pub fn update_addresses(&self, updated_addresses: HashSet<Address>) -> Result {
-    let rtx = self.database.begin_read()?;
-    let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
-
+  pub fn update_addresses(
+    &self,
+    script_pubkey_to_outpoint: &mut MultimapTable<&[u8], OutPointValue>,
+    outpoint_to_rune_balances: &mut Table<&OutPointValue, &[u8]>,
+    updated_addresses: HashSet<Address>,
+  ) -> Result {
     let mut addresses = Vec::new();
     for address in updated_addresses.clone() {
-      let outputs = self.get_address_info(&address)?;
-      let runes_balances = self.get_aggregated_rune_balances_for_outputs(&outputs)?;
-      if let Some(runes_balances) = runes_balances {
-        for rune_balance in runes_balances {
-          let rune_id = RuneId::load(
-            rune_to_rune_id
-              .get(&rune_balance.0.rune.store())?
-              .unwrap()
-              .value(),
-          );
-          addresses.push((address.clone(), rune_id, rune_balance.1.value));
+      let outputs = script_pubkey_to_outpoint
+        .get(address.script_pubkey().as_bytes())?
+        .map(|result| {
+          result
+            .map_err(|err| anyhow!(err))
+            .map(|value| OutPoint::load(value.value()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+      let mut runes = BTreeMap::new();
+
+      // Collect all rune balances for this address
+      for output in &outputs {
+        if let Some(balances) = outpoint_to_rune_balances.get(&output.store())? {
+          let balances_buffer = balances.value();
+          self.aggregate_rune_balances(balances_buffer, &mut runes)?;
         }
+      }
+
+      // Create address entries for each rune balance
+      for (rune_id, amount) in runes {
+        addresses.push((address.clone(), rune_id, amount));
       }
     }
 
     self
       .pg_database
-      .pg_upsert_address_rune_balances_chunked(addresses, 1000)?;
+      .pg_upsert_address_rune_balances_chunked(addresses, 2000)?;
 
+    Ok(())
+  }
+
+  fn aggregate_rune_balances(
+    &self,
+    balances_buffer: &[u8],
+    runes: &mut BTreeMap<RuneId, u128>,
+  ) -> Result<()> {
+    let mut i = 0;
+    while i < balances_buffer.len() {
+      let ((id, amount), length) = Self::decode_rune_balance(&balances_buffer[i..])?;
+      i += length;
+
+      runes
+        .entry(id)
+        .and_modify(|base| *base += amount)
+        .or_insert(amount);
+    }
     Ok(())
   }
 }

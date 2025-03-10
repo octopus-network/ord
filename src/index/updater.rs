@@ -356,6 +356,7 @@ impl Updater<'_> {
       let mut rune_to_rune_id = wtx.open_table(RUNE_TO_RUNE_ID)?;
       let mut sequence_number_to_rune_id = wtx.open_table(SEQUENCE_NUMBER_TO_RUNE_ID)?;
       let mut transaction_id_to_rune = wtx.open_table(TRANSACTION_ID_TO_RUNE)?;
+      let mut script_pubkey_to_outpoint = wtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
 
       let runes = statistic_to_count
         .get(&Statistic::Runes.into())?
@@ -397,6 +398,7 @@ impl Updater<'_> {
         transaction_id_to_rune: &mut transaction_id_to_rune,
         index: &self.index,
         rs_updates: RsUpdates::default(),
+        script_pubkey_to_outpoint: &mut script_pubkey_to_outpoint,
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
@@ -851,12 +853,17 @@ impl Updater<'_> {
       let mut outpoint_to_utxo_entry = wtx.open_table(OUTPOINT_TO_UTXO_ENTRY)?;
       let mut script_pubkey_to_outpoint = wtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
       let mut sequence_number_to_satpoint = wtx.open_table(SEQUENCE_NUMBER_TO_SATPOINT)?;
+      let outpoint_to_balances = wtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
 
       for (outpoint, mut utxo_entry) in utxo_cache {
         if Index::is_special_outpoint(outpoint) {
           if let Some(old_entry) = outpoint_to_utxo_entry.get(&outpoint.store())? {
             utxo_entry = UtxoEntryBuf::merged(old_entry.value(), &utxo_entry, self.index);
           }
+        }
+
+        if outpoint_to_balances.get(&outpoint.store())?.is_none() {
+          continue;
         }
 
         outpoint_to_utxo_entry.insert(&outpoint.store(), utxo_entry.as_ref())?;

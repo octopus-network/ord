@@ -68,7 +68,7 @@ impl Reorg {
     Index::increment_statistic(&wtx, Statistic::Commits, 1)?;
     wtx.commit()?;
 
-    let current_height = index.begin_read()?.block_count()?;
+    let current_height = index.block_count()?;
     let runes = index.pg_database.pg_query_updated_runes(current_height)?;
     log::info!(
       "Reorging {} runes from height {}",
@@ -84,8 +84,18 @@ impl Reorg {
       addresses.len(),
       current_height
     );
-    index.update_runes(runes)?;
-    index.update_addresses(addresses)?;
+
+    let wtx = index.begin_write()?;
+    let mut rune_id_to_rune_entry = wtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
+    let mut outpoint_to_rune_balances = wtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
+    let mut script_pubkey_to_outpoint = wtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
+
+    index.update_runes(&mut rune_id_to_rune_entry, runes)?;
+    index.update_addresses(
+      &mut script_pubkey_to_outpoint,
+      &mut outpoint_to_rune_balances,
+      addresses,
+    )?;
     index.pg_database.pg_mark_reorg(current_height)?;
 
     log::info!(
