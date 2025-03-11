@@ -84,7 +84,20 @@ impl PgDatabase {
         .push_bind(BigDecimal::from(rune_entry.mints))
         .push_bind(BigDecimal::from(rune_entry.premine))
         .push_bind(rune_entry.spaced_rune.to_string())
-        .push_bind(rune_entry.symbol.map(|s| s.to_string()))
+        .push_bind(rune_entry.symbol.map(|s| {
+          let s_str = s.to_string();
+          if s_str.contains('\0') {
+            log::warn!(
+              "Found null byte in rune symbol - Rune ID: {}, Symbol: {:?}, Bytes: {:?}",
+              rune_id.to_string(),
+              s,
+              s_str.as_bytes()
+            );
+            s_str.replace('\0', "")
+          } else {
+            s_str
+          }
+        }))
         .push_bind(rune_entry.terms.and_then(|t| t.cap).map(BigDecimal::from))
         .push_bind(
           rune_entry
