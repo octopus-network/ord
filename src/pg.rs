@@ -85,17 +85,15 @@ impl PgDatabase {
         .push_bind(BigDecimal::from(rune_entry.premine))
         .push_bind(rune_entry.spaced_rune.to_string())
         .push_bind(rune_entry.symbol.map(|s| {
-          let s_str = s.to_string();
-          if s_str.contains('\0') {
+          if s == '\0' {
             log::warn!(
-              "Found null byte in rune symbol - Rune ID: {}, Symbol: {:?}, Bytes: {:?}",
-              rune_id.to_string(),
-              s,
-              s_str.as_bytes()
+              "Found null byte as symbol - Rune ID: {}.",
+              rune_id.to_string()
             );
-            s_str.replace('\0', "")
+
+            None
           } else {
-            s_str
+            Some(s.to_string())
           }
         }))
         .push_bind(rune_entry.terms.and_then(|t| t.cap).map(BigDecimal::from))
@@ -178,6 +176,27 @@ impl PgDatabase {
       return Ok(());
     }
 
+    let processed_rs_txs = rs_txs
+      .into_iter()
+      .map(|(txid, mut transaction)| {
+        for output in &mut transaction.outputs {
+          if let Some(ref mut artifact) = output.op_return {
+            if let Artifact::Runestone(ref mut runestone) = artifact {
+              if let Some(etching) = &mut runestone.etching {
+                if let Some(symbol) = etching.symbol {
+                  if symbol == '\0' {
+                    etching.symbol = None;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        (txid, transaction)
+      })
+      .collect::<HashMap<_, _>>();
+
     let mut query_builder = QueryBuilder::new(
       "INSERT INTO public.transactions (
             txid,
@@ -187,7 +206,7 @@ impl PgDatabase {
         ) ",
     );
 
-    query_builder.push_values(rs_txs.clone(), |mut b, (txid, transaction)| {
+    query_builder.push_values(processed_rs_txs, |mut b, (txid, transaction)| {
       b.push_bind(txid.to_string())
         .push_bind(serde_json::to_value(transaction).unwrap())
         .push_bind(BigDecimal::from(block))
