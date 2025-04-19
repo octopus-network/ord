@@ -2,6 +2,7 @@ use {
   self::{inscription_updater::InscriptionUpdater, rune_updater::RuneUpdater},
   super::{fetcher::Fetcher, *},
   futures::future::try_join_all,
+  pg::RsUpdates,
   tokio::sync::{
     broadcast::{self, error::TryRecvError},
     mpsc::{self},
@@ -38,6 +39,7 @@ pub(crate) struct Updater<'index> {
   pub(super) outputs_cached: u64,
   pub(super) outputs_traversed: u64,
   pub(super) sat_ranges_since_flush: u64,
+  pub(super) rs_updates: RsUpdates,
 }
 
 impl Updater<'_> {
@@ -78,6 +80,9 @@ impl Updater<'_> {
     let mut uncommitted = 0;
     let mut utxo_cache = HashMap::new();
     while let Ok(block) = rx.recv() {
+      let block_time = block.header.time;
+      self.rs_updates = RsUpdates::default();
+
       self.index_block(
         &mut output_sender,
         &mut txout_receiver,
@@ -129,6 +134,8 @@ impl Updater<'_> {
               .as_millis(),
           )?;
       }
+
+      self.pg_update(block_time)?;
 
       if SHUTTING_DOWN.load(atomic::Ordering::Relaxed) {
         break;
@@ -361,6 +368,21 @@ impl Updater<'_> {
         .map(|x| x.value())
         .unwrap_or(0);
 
+      if self.height % 10 == 0 {
+        let reserved_runes = statistic_to_count
+          .get(&Statistic::ReservedRunes.into())?
+          .map(|x| x.value())
+          .unwrap_or(0);
+
+        log::info!(
+          "height: {}, reserved_runes: {}, runes: {}, outpoint_to_rune_balances: {}",
+          self.height,
+          reserved_runes,
+          runes,
+          outpoint_to_rune_balances.len()?
+        );
+      }
+
       let mut rune_updater = RuneUpdater {
         event_sender: self.index.event_sender.as_ref(),
         block_time: block.header.time,
@@ -379,6 +401,8 @@ impl Updater<'_> {
         sequence_number_to_rune_id: &mut sequence_number_to_rune_id,
         statistic_to_count: &mut statistic_to_count,
         transaction_id_to_rune: &mut transaction_id_to_rune,
+        index: &self.index,
+        rs_updates: &mut self.rs_updates,
       };
 
       for (i, (tx, txid)) in block.txdata.iter().enumerate() {
@@ -870,6 +894,69 @@ impl Updater<'_> {
     self.index.begin_write()?.commit()?;
 
     Reorg::update_savepoints(self.index, self.height)?;
+
+    Ok(())
+  }
+
+  fn pg_update(&self, block_time: u32) -> Result {
+    let height = self.height - 1;
+
+    let rtx = self.index.database.begin_read()?;
+
+    let id_to_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
+    let outpoint_to_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
+    let script_pubkey_to_outpoint = rtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
+
+    // insert runes
+    self
+      .index
+      .pg_database
+      .pg_insert_runes_chunked(self.rs_updates.runes.clone(), 2000)?;
+
+    self
+      .index
+      .update_runes(&id_to_entry, self.rs_updates.updated_runes.clone())?;
+    self.index.pg_database.pg_insert_updated_runes_chunked(
+      height,
+      self.rs_updates.updated_runes.clone(),
+      2000,
+    )?;
+
+    // insert transactions
+    self.index.pg_database.pg_insert_transactions_chunked(
+      height,
+      self.rs_updates.transactions.clone(),
+      2000,
+    )?;
+
+    // insert rune_transactions
+    self.index.pg_database.pg_insert_rune_transactions_chunked(
+      self.rs_updates.rune_transactions.clone(),
+      height as u64,
+      block_time,
+      2000,
+    )?;
+
+    // insert address_transactions
+    self
+      .index
+      .pg_database
+      .pg_insert_address_transactions_chunked(
+        height,
+        self.rs_updates.address_transactions.clone(),
+        2000,
+      )?;
+
+    self.index.update_addresses(
+      &script_pubkey_to_outpoint,
+      &outpoint_to_balances,
+      self.rs_updates.updated_addresses.clone(),
+    )?;
+    self.index.pg_database.pg_insert_updated_addresses_chunked(
+      height,
+      self.rs_updates.updated_addresses.clone(),
+      2000,
+    )?;
 
     Ok(())
   }

@@ -68,9 +68,39 @@ impl Reorg {
     Index::increment_statistic(&wtx, Statistic::Commits, 1)?;
     wtx.commit()?;
 
+    let current_height = index.block_count()?;
+    let runes = index.pg_database.pg_query_updated_runes(current_height)?;
+    log::info!(
+      "Reorging {} runes from height {}",
+      runes.len(),
+      current_height
+    );
+
+    let addresses = index
+      .pg_database
+      .pg_query_updated_addresses(current_height)?;
+    log::info!(
+      "Reorging {} addresses from height {}",
+      addresses.len(),
+      current_height
+    );
+
+    let rtx = index.database.begin_read()?;
+    let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
+    let outpoint_to_rune_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
+    let script_pubkey_to_outpoint = rtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
+
+    index.update_runes(&rune_id_to_rune_entry, runes)?;
+    index.update_addresses(
+      &script_pubkey_to_outpoint,
+      &outpoint_to_rune_balances,
+      addresses,
+    )?;
+    index.pg_database.pg_mark_reorg(current_height)?;
+
     log::info!(
       "successfully rolled back database to height {}",
-      index.begin_read()?.block_count()?
+      current_height
     );
 
     Ok(())

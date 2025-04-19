@@ -1,3 +1,6 @@
+use pg::PgDatabase;
+use pg::RsUpdates;
+use redb::ReadOnlyMultimapTable;
 use {
   self::{
     entry::{
@@ -212,6 +215,7 @@ pub struct Index {
   started: DateTime<Utc>,
   first_index_height: u32,
   unrecoverably_reorged: AtomicBool,
+  pg_database: PgDatabase,
 }
 
 impl Index {
@@ -223,6 +227,7 @@ impl Index {
     settings: &Settings,
     event_sender: Option<tokio::sync::mpsc::Sender<Event>>,
   ) -> Result<Self> {
+    let pg_database = PgDatabase::new();
     let client = settings.bitcoin_rpc_client(None)?;
 
     let path = settings.index().to_owned();
@@ -377,32 +382,34 @@ impl Index {
 
           Self::set_statistic(&mut statistics, Statistic::Runes, 1)?;
 
-          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?.insert(
-            id.store(),
-            RuneEntry {
-              block: id.block,
-              burned: 0,
-              divisibility: 0,
-              etching,
-              terms: Some(Terms {
-                amount: Some(1),
-                cap: Some(u128::MAX),
-                height: (
-                  Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
-                  Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
-                ),
-                offset: (None, None),
-              }),
-              mints: 0,
-              number: 0,
-              premine: 0,
-              spaced_rune: SpacedRune { rune, spacers: 128 },
-              symbol: Some('\u{29C9}'),
-              timestamp: 0,
-              turbo: true,
-            }
-            .store(),
-          )?;
+          let entry = RuneEntry {
+            block: id.block,
+            burned: 0,
+            divisibility: 0,
+            etching,
+            terms: Some(Terms {
+              amount: Some(1),
+              cap: Some(u128::MAX),
+              height: (
+                Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
+                Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
+              ),
+              offset: (None, None),
+            }),
+            mints: 0,
+            number: 0,
+            premine: 0,
+            spaced_rune: SpacedRune { rune, spacers: 128 },
+            symbol: Some('\u{29C9}'),
+            timestamp: 0,
+            turbo: true,
+          };
+
+          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?
+            .insert(id.store(), entry.store())?;
+
+          let runes = HashMap::from_iter([(id, entry)]);
+          let _ = pg_database.pg_insert_runes(runes);
 
           tx.open_table(TRANSACTION_ID_TO_RUNE)?
             .insert(&etching.store(), rune.store())?;
@@ -434,7 +441,7 @@ impl Index {
     let genesis_block_coinbase_transaction =
       settings.chain().genesis_block().coinbase().unwrap().clone();
 
-    let first_index_height = if index_sats || index_addresses {
+    let first_index_height = if index_sats {
       0
     } else if index_inscriptions {
       settings.first_inscription_height()
@@ -462,6 +469,7 @@ impl Index {
       path,
       started: Utc::now(),
       unrecoverably_reorged: AtomicBool::new(false),
+      pg_database,
     })
   }
 
@@ -669,6 +677,7 @@ impl Index {
         outputs_cached: 0,
         outputs_traversed: 0,
         sat_ranges_since_flush: 0,
+        rs_updates: RsUpdates::default(),
       };
 
       match updater.update_index(wtx) {
@@ -2555,6 +2564,87 @@ impl Index {
       ),
       txout,
     )))
+  }
+
+  pub fn update_runes(
+    &self,
+    id_to_entry: &ReadOnlyTable<RuneIdValue, RuneEntryValue>,
+    updated_runes: HashSet<RuneId>,
+  ) -> Result {
+    let runes: Vec<_> = updated_runes
+      .clone()
+      .into_iter()
+      .filter_map(|rune_id| {
+        id_to_entry.get(&rune_id.store()).ok()?.map(|entry| {
+          let entry = RuneEntry::load(entry.value());
+          (rune_id, entry.burned, entry.mints)
+        })
+      })
+      .collect();
+
+    if !runes.is_empty() {
+      self.pg_database.pg_update_runes_chunked(runes, 2000)?;
+    }
+
+    Ok(())
+  }
+
+  pub fn update_addresses(
+    &self,
+    script_pubkey_to_outpoint: &ReadOnlyMultimapTable<&[u8], OutPointValue>,
+    outpoint_to_rune_balances: &ReadOnlyTable<&OutPointValue, &[u8]>,
+    updated_addresses: HashSet<Address>,
+  ) -> Result {
+    let mut addresses = Vec::new();
+    for address in updated_addresses.clone() {
+      let outputs = script_pubkey_to_outpoint
+        .get(address.script_pubkey().as_bytes())?
+        .map(|result| {
+          result
+            .map_err(|err| anyhow!(err))
+            .map(|value| OutPoint::load(value.value()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+      let mut runes = BTreeMap::new();
+
+      // Collect all rune balances for this address
+      for output in &outputs {
+        if let Some(balances) = outpoint_to_rune_balances.get(&output.store())? {
+          let balances_buffer = balances.value();
+          self.aggregate_rune_balances(balances_buffer, &mut runes)?;
+        }
+      }
+
+      // Create address entries for each rune balance
+      for (rune_id, amount) in runes {
+        addresses.push((address.clone(), rune_id, amount));
+      }
+    }
+
+    self
+      .pg_database
+      .pg_upsert_address_rune_balances_chunked(addresses, 2000)?;
+
+    Ok(())
+  }
+
+  fn aggregate_rune_balances(
+    &self,
+    balances_buffer: &[u8],
+    runes: &mut BTreeMap<RuneId, u128>,
+  ) -> Result<()> {
+    let mut i = 0;
+    while i < balances_buffer.len() {
+      let ((id, amount), length) = Self::decode_rune_balance(&balances_buffer[i..])?;
+      i += length;
+
+      runes
+        .entry(id)
+        .and_modify(|base| *base += amount)
+        .or_insert(amount);
+    }
+    Ok(())
   }
 }
 
