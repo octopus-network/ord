@@ -299,7 +299,7 @@ dependencies = [
  "log",
  "rustls-pki-types",
  "thiserror 1.0.69",
- "webpki-roots",
+ "webpki-roots 0.26.8",
 ]
 
 [[package]]
@@ -1292,6 +1292,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "electrum-client"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8ed4d35bb98a55540bb5b735731486febddf9cc9b6e96f5b3fd2536eed81a4e"
+dependencies = [
+ "bitcoin",
+ "byteorder",
+ "libc",
+ "log",
+ "rustls",
+ "serde",
+ "serde_json",
+ "webpki-roots 0.25.4",
+ "winapi",
 ]
 
 [[package]]
@@ -2844,6 +2861,7 @@ dependencies = [
  "ctrlc",
  "derive_more",
  "dirs",
+ "electrum-client",
  "env_logger",
  "executable-path",
  "futures",
@@ -3561,7 +3579,7 @@ dependencies = [
  "tokio",
  "tokio-util 0.7.14",
  "tower-service",
- "webpki-roots",
+ "webpki-roots 0.26.8",
  "x509-parser",
 ]
 
@@ -4762,6 +4780,12 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "webpki-roots"
+version = "0.25.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 
 [[package]]
 name = "webpki-roots"

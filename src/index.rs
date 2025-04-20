@@ -1,6 +1,6 @@
+use electrum_client::ElectrumApi;
 use pg::PgDatabase;
 use pg::RsUpdates;
-use redb::ReadOnlyMultimapTable;
 use {
   self::{
     entry::{
@@ -216,6 +216,7 @@ pub struct Index {
   first_index_height: u32,
   unrecoverably_reorged: AtomicBool,
   pg_database: PgDatabase,
+  electrum_client: electrum_client::Client,
 }
 
 impl Index {
@@ -228,6 +229,7 @@ impl Index {
     event_sender: Option<tokio::sync::mpsc::Sender<Event>>,
   ) -> Result<Self> {
     let pg_database = PgDatabase::new();
+    let electrum_client = electrum_client::Client::new("tcp://fulcrum:50001").unwrap();
     let client = settings.bitcoin_rpc_client(None)?;
 
     let path = settings.index().to_owned();
@@ -441,7 +443,7 @@ impl Index {
     let genesis_block_coinbase_transaction =
       settings.chain().genesis_block().coinbase().unwrap().clone();
 
-    let first_index_height = if index_sats {
+    let first_index_height = if index_sats || index_addresses {
       0
     } else if index_inscriptions {
       settings.first_inscription_height()
@@ -470,6 +472,7 @@ impl Index {
       started: Utc::now(),
       unrecoverably_reorged: AtomicBool::new(false),
       pg_database,
+      electrum_client,
     })
   }
 
@@ -2591,20 +2594,20 @@ impl Index {
 
   pub fn update_addresses(
     &self,
-    script_pubkey_to_outpoint: &ReadOnlyMultimapTable<&[u8], OutPointValue>,
     outpoint_to_rune_balances: &ReadOnlyTable<&OutPointValue, &[u8]>,
     updated_addresses: HashSet<Address>,
   ) -> Result {
     let mut addresses = Vec::new();
     for address in updated_addresses.clone() {
-      let outputs = script_pubkey_to_outpoint
-        .get(address.script_pubkey().as_bytes())?
-        .map(|result| {
-          result
-            .map_err(|err| anyhow!(err))
-            .map(|value| OutPoint::load(value.value()))
-        })
-        .collect::<Result<Vec<_>>>()?;
+      let outputs = self
+        .electrum_client
+        .script_list_unspent(address.script_pubkey().as_script())?
+        .into_iter()
+        .map(|unspent| OutPoint::new(unspent.tx_hash, unspent.tx_pos.try_into().unwrap()))
+        .collect::<Vec<OutPoint>>();
+      if outputs.len() == 2 {
+        log::info!("address {} has outputs: {:?}", address, outputs);
+      }
 
       let mut runes = BTreeMap::new();
 

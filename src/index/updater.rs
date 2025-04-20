@@ -905,7 +905,6 @@ impl Updater<'_> {
 
     let id_to_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let outpoint_to_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
-    let script_pubkey_to_outpoint = rtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
 
     // insert runes
     self
@@ -948,7 +947,6 @@ impl Updater<'_> {
       )?;
 
     self.index.update_addresses(
-      &script_pubkey_to_outpoint,
       &outpoint_to_balances,
       self.rs_updates.updated_addresses.clone(),
     )?;

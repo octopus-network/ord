@@ -88,14 +88,9 @@ impl Reorg {
     let rtx = index.database.begin_read()?;
     let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
     let outpoint_to_rune_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
-    let script_pubkey_to_outpoint = rtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
 
     index.update_runes(&rune_id_to_rune_entry, runes)?;
-    index.update_addresses(
-      &script_pubkey_to_outpoint,
-      &outpoint_to_rune_balances,
-      addresses,
-    )?;
+    index.update_addresses(&outpoint_to_rune_balances, addresses)?;
     index.pg_database.pg_mark_reorg(current_height)?;
 
     log::info!(
