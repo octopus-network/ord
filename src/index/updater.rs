@@ -910,7 +910,7 @@ impl Updater<'_> {
     self
       .index
       .pg_database
-      .pg_insert_runes_chunked(self.rs_updates.runes.clone(), 2000)?;
+      .pg_insert_runes_chunked(self.rs_updates.runes.clone(), 1000)?;
 
     self
       .index
@@ -918,14 +918,14 @@ impl Updater<'_> {
     self.index.pg_database.pg_insert_updated_runes_chunked(
       height,
       self.rs_updates.updated_runes.clone(),
-      2000,
+      1000,
     )?;
 
     // insert transactions
     self.index.pg_database.pg_insert_transactions_chunked(
       height,
       self.rs_updates.transactions.clone(),
-      2000,
+      1000,
     )?;
 
     // insert rune_transactions
@@ -933,7 +933,7 @@ impl Updater<'_> {
       self.rs_updates.rune_transactions.clone(),
       height as u64,
       block_time,
-      2000,
+      1000,
     )?;
 
     // insert address_transactions
@@ -943,7 +943,7 @@ impl Updater<'_> {
       .pg_insert_address_transactions_chunked(
         height,
         self.rs_updates.address_transactions.clone(),
-        2000,
+        1000,
       )?;
 
     self.index.update_addresses(
@@ -953,7 +953,7 @@ impl Updater<'_> {
     self.index.pg_database.pg_insert_updated_addresses_chunked(
       height,
       self.rs_updates.updated_addresses.clone(),
-      2000,
+      1000,
     )?;
 
     Ok(())

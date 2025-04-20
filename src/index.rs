@@ -2586,7 +2586,7 @@ impl Index {
       .collect();
 
     if !runes.is_empty() {
-      self.pg_database.pg_update_runes_chunked(runes, 2000)?;
+      self.pg_database.pg_update_runes_chunked(runes, 1000)?;
     }
 
     Ok(())
@@ -2627,7 +2627,7 @@ impl Index {
 
     self
       .pg_database
-      .pg_upsert_address_rune_balances_chunked(addresses, 2000)?;
+      .pg_upsert_address_rune_balances_chunked(addresses, 1000)?;
 
     Ok(())
   }
