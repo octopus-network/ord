@@ -229,7 +229,9 @@ impl Index {
     event_sender: Option<tokio::sync::mpsc::Sender<Event>>,
   ) -> Result<Self> {
     let pg_database = PgDatabase::new();
-    let electrum_client = electrum_client::Client::new("tcp://fulcrum:50001").unwrap();
+    let electrum_config = electrum_client::ConfigBuilder::new().retry(3).build();
+    let electrum_client =
+      electrum_client::Client::from_config("tcp://fulcrum:50001", electrum_config).unwrap();
     let client = settings.bitcoin_rpc_client(None)?;
 
     let path = settings.index().to_owned();
@@ -2599,15 +2601,13 @@ impl Index {
   ) -> Result {
     let mut addresses = Vec::new();
     for address in updated_addresses.clone() {
-      let outputs = self
+      let unspent_list = self
         .electrum_client
-        .script_list_unspent(address.script_pubkey().as_script())?
+        .script_list_unspent(address.script_pubkey().as_script())?;
+      let outputs = unspent_list
         .into_iter()
         .map(|unspent| OutPoint::new(unspent.tx_hash, unspent.tx_pos.try_into().unwrap()))
         .collect::<Vec<OutPoint>>();
-      if outputs.len() == 2 {
-        log::info!("address {} has outputs: {:?}", address, outputs);
-      }
 
       let mut runes = BTreeMap::new();
 
