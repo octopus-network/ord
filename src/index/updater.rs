@@ -73,18 +73,10 @@ impl Updater<'_> {
 
     let rx = Self::fetch_blocks_from(self.index, self.height)?;
 
-    let (mut output_sender, mut txout_receiver) = Self::spawn_fetcher(self.index)?;
-
     let mut uncommitted = 0;
     let mut utxo_cache = HashMap::new();
     while let Ok(block) = rx.recv() {
-      self.index_block(
-        &mut output_sender,
-        &mut txout_receiver,
-        &mut wtx,
-        block,
-        &mut utxo_cache,
-      )?;
+      self.index_block(&mut wtx, block, &mut utxo_cache)?;
 
       if let Some(progress_bar) = &mut progress_bar {
         progress_bar.inc(1);
@@ -236,83 +228,8 @@ impl Updater<'_> {
     }
   }
 
-  fn spawn_fetcher(index: &Index) -> Result<(mpsc::Sender<OutPoint>, broadcast::Receiver<TxOut>)> {
-    let fetcher = Fetcher::new(&index.settings)?;
-
-    // A block probably has no more than 20k inputs
-    const CHANNEL_BUFFER_SIZE: usize = 20_000;
-
-    // Batch 2048 missing inputs at a time, arbitrarily chosen size
-    const BATCH_SIZE: usize = 2048;
-
-    let (outpoint_sender, mut outpoint_receiver) = mpsc::channel::<OutPoint>(CHANNEL_BUFFER_SIZE);
-
-    let (txout_sender, txout_receiver) = broadcast::channel::<TxOut>(CHANNEL_BUFFER_SIZE);
-
-    // Default rpcworkqueue in bitcoind is 16, meaning more than 16 concurrent requests will be rejected.
-    // Since we are already requesting blocks on a separate thread, and we don't want to break if anything
-    // else runs a request, we keep this to 12.
-    let parallel_requests: usize = index.settings.bitcoin_rpc_limit().try_into().unwrap();
-
-    thread::spawn(move || {
-      let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-      rt.block_on(async move {
-        loop {
-          let Some(outpoint) = outpoint_receiver.recv().await else {
-            log::debug!("Outpoint channel closed");
-            return;
-          };
-
-          // There's no try_iter on tokio::sync::mpsc::Receiver like std::sync::mpsc::Receiver.
-          // So we just loop until BATCH_SIZE doing try_recv until it returns None.
-          let mut outpoints = vec![outpoint];
-          for _ in 0..BATCH_SIZE - 1 {
-            let Ok(outpoint) = outpoint_receiver.try_recv() else {
-              break;
-            };
-            outpoints.push(outpoint);
-          }
-
-          // Break outputs into chunks for parallel requests
-          let chunk_size = (outpoints.len() / parallel_requests) + 1;
-          let mut futs = Vec::with_capacity(parallel_requests);
-          for chunk in outpoints.chunks(chunk_size) {
-            let txids = chunk.iter().map(|outpoint| outpoint.txid).collect();
-            let fut = fetcher.get_transactions(txids);
-            futs.push(fut);
-          }
-
-          let txs = match try_join_all(futs).await {
-            Ok(txs) => txs,
-            Err(e) => {
-              log::error!("Couldn't receive txs {e}");
-              return;
-            }
-          };
-
-          // Send all tx outputs back in order
-          for (i, tx) in txs.iter().flatten().enumerate() {
-            let Ok(_) =
-              txout_sender.send(tx.output[usize::try_from(outpoints[i].vout).unwrap()].clone())
-            else {
-              log::error!("Value channel closed unexpectedly");
-              return;
-            };
-          }
-        }
-      })
-    });
-
-    Ok((outpoint_sender, txout_receiver))
-  }
-
   fn index_block(
     &mut self,
-    output_sender: &mut mpsc::Sender<OutPoint>,
-    txout_receiver: &mut broadcast::Receiver<TxOut>,
     wtx: &mut WriteTransaction,
     block: BlockData,
     utxo_cache: &mut HashMap<OutPoint, UtxoEntryBuf>,
@@ -338,8 +255,6 @@ impl Updater<'_> {
     if self.index.index_inscriptions || self.index.index_addresses || self.index.index_sats {
       self.index_utxo_entries(
         &block,
-        txout_receiver,
-        output_sender,
         utxo_cache,
         wtx,
         &mut inscription_id_to_sequence_number,
@@ -347,45 +262,6 @@ impl Updater<'_> {
         &mut sat_ranges_written,
         &mut outputs_in_block,
       )?;
-    }
-
-    if self.index.index_runes && self.height >= self.index.settings.first_rune_height() {
-      let mut outpoint_to_rune_balances = wtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
-      let mut rune_id_to_rune_entry = wtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
-      let mut rune_to_rune_id = wtx.open_table(RUNE_TO_RUNE_ID)?;
-      let mut sequence_number_to_rune_id = wtx.open_table(SEQUENCE_NUMBER_TO_RUNE_ID)?;
-      let mut transaction_id_to_rune = wtx.open_table(TRANSACTION_ID_TO_RUNE)?;
-
-      let runes = statistic_to_count
-        .get(&Statistic::Runes.into())?
-        .map(|x| x.value())
-        .unwrap_or(0);
-
-      let mut rune_updater = RuneUpdater {
-        event_sender: self.index.event_sender.as_ref(),
-        block_time: block.header.time,
-        burned: HashMap::new(),
-        client: &self.index.client,
-        height: self.height,
-        id_to_entry: &mut rune_id_to_rune_entry,
-        inscription_id_to_sequence_number: &mut inscription_id_to_sequence_number,
-        minimum: Rune::minimum_at_height(
-          self.index.settings.chain().network(),
-          Height(self.height),
-        ),
-        outpoint_to_balances: &mut outpoint_to_rune_balances,
-        rune_to_id: &mut rune_to_rune_id,
-        runes,
-        sequence_number_to_rune_id: &mut sequence_number_to_rune_id,
-        statistic_to_count: &mut statistic_to_count,
-        transaction_id_to_rune: &mut transaction_id_to_rune,
-      };
-
-      for (i, (tx, txid)) in block.txdata.iter().enumerate() {
-        rune_updater.index_runes(u32::try_from(i).unwrap(), tx, *txid)?;
-      }
-
-      rune_updater.update()?;
     }
 
     height_to_block_header.insert(&self.height, &block.header.store())?;
@@ -404,8 +280,6 @@ impl Updater<'_> {
   fn index_utxo_entries<'wtx>(
     &mut self,
     block: &BlockData,
-    txout_receiver: &mut broadcast::Receiver<TxOut>,
-    output_sender: &mut mpsc::Sender<OutPoint>,
     utxo_cache: &mut HashMap<OutPoint, UtxoEntryBuf>,
     wtx: &'wtx WriteTransaction,
     inscription_id_to_sequence_number: &mut Table<'wtx, (u128, u128, u32), u32>,
@@ -428,49 +302,6 @@ impl Updater<'_> {
 
     let index_inscriptions = self.height >= self.index.settings.first_inscription_height()
       && self.index.index_inscriptions;
-
-    // If the receiver still has inputs something went wrong in the last
-    // block and we shouldn't recover from this and commit the last block
-    if index_inscriptions {
-      assert!(
-        matches!(txout_receiver.try_recv(), Err(TryRecvError::Empty)),
-        "Previous block did not consume all inputs"
-      );
-    }
-
-    if !self.index.have_full_utxo_index() {
-      // Send all missing input outpoints to be fetched
-      let txids = block
-        .txdata
-        .iter()
-        .map(|(_, txid)| txid)
-        .collect::<HashSet<_>>();
-
-      for (tx, _) in &block.txdata {
-        for input in &tx.input {
-          let prev_output = input.previous_output;
-          // We don't need coinbase inputs
-          if prev_output.is_null() {
-            continue;
-          }
-          // We don't need inputs from txs earlier in the block, since
-          // they'll be added to cache when the tx is indexed
-          if txids.contains(&prev_output.txid) {
-            continue;
-          }
-          // We don't need inputs we already have in our cache from earlier blocks
-          if utxo_cache.contains_key(&prev_output) {
-            continue;
-          }
-          // We don't need inputs we already have in our database
-          if outpoint_to_utxo_entry.get(&prev_output.store())?.is_some() {
-            continue;
-          }
-          // Send this outpoint to background thread to be fetched
-          output_sender.blocking_send(prev_output)?;
-        }
-      }
-    }
 
     let mut lost_sats = statistic_to_count
       .get(&Statistic::LostSats.key())?
@@ -565,19 +396,8 @@ impl Updater<'_> {
               entry.value().to_buf()
             } else {
               assert!(!self.index.have_full_utxo_index());
-              let txout = txout_receiver.blocking_recv().map_err(|err| {
-                anyhow!(
-                  "failed to get transaction for {}: {err}",
-                  input.previous_output
-                )
-              })?;
-
-              let mut entry = UtxoEntryBuf::new();
-              entry.push_value(txout.value.to_sat(), self.index);
-              if self.index.index_addresses {
-                entry.push_script_pubkey(txout.script_pubkey.as_bytes(), self.index);
-              }
-
+              // TODO: This branch should never be reached
+              let entry = UtxoEntryBuf::new();
               entry
             };
 
