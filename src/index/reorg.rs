@@ -90,7 +90,7 @@ impl Reorg {
     let outpoint_to_rune_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
 
     index.update_runes(&rune_id_to_rune_entry, runes)?;
-    index.update_addresses(&outpoint_to_rune_balances, addresses)?;
+    index.update_addresses(current_height, &outpoint_to_rune_balances, addresses)?;
     index.pg_database.pg_mark_reorg(current_height)?;
 
     log::info!(

@@ -2594,11 +2594,31 @@ impl Index {
     Ok(())
   }
 
+  fn wait_for_fulcrum(&self, height: u32) {
+    loop {
+      match self.electrum_client.block_header(height as usize) {
+        Ok(_header) => {
+          break;
+        }
+        Err(err) => {
+          log::error!(
+            "Block at height {} not yet available in electrum server: {}. Will retry in 10 seconds...",
+            height,
+            err
+          );
+        }
+      }
+      std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+  }
+
   pub fn update_addresses(
     &self,
+    height: u32,
     outpoint_to_rune_balances: &ReadOnlyTable<&OutPointValue, &[u8]>,
     updated_addresses: HashSet<Address>,
   ) -> Result {
+    self.wait_for_fulcrum(height);
     let mut addresses = Vec::new();
     for address in updated_addresses.clone() {
       let unspent_list = self

@@ -947,6 +947,7 @@ impl Updater<'_> {
       )?;
 
     self.index.update_addresses(
+      height,
       &outpoint_to_balances,
       self.rs_updates.updated_addresses.clone(),
     )?;
