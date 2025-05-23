@@ -681,7 +681,6 @@ impl Index {
     log::info!("Updating addresses at height {height}");
 
     let start_time = std::time::Instant::now();
-    let mut loop_count = 0;
     loop {
       let pending_addresses = self.pg_database.pg_query_pending_addresses()?;
       if pending_addresses.is_empty() {
@@ -701,12 +700,6 @@ impl Index {
       self
         .pg_database
         .pg_mark_updated_addresses(pending_addresses)?;
-
-      loop_count += 1;
-      if loop_count >= 10 {
-        log::info!("Reached maximum loop count of 10, exiting...");
-        break;
-      }
     }
     let elapsed = start_time.elapsed();
     log::info!("Address update completed in {:.2?}", elapsed);
