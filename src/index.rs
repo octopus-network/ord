@@ -667,44 +667,51 @@ impl Index {
   }
 
   pub fn update(&self) -> Result {
+    let wtx = self.begin_write()?;
+    let height = wtx
+      .open_table(HEIGHT_TO_BLOCK_HEADER)?
+      .range(0..)?
+      .next_back()
+      .transpose()?
+      .map(|(height, _header)| height.value() + 1)
+      .unwrap_or(0);
+
+    let rtx = self.database.begin_read()?;
+    let outpoint_to_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
+    log::info!("Updating addresses at height {height}");
+
+    let start_time = std::time::Instant::now();
+    let mut loop_count = 0;
     loop {
-      let wtx = self.begin_write()?;
+      let pending_addresses = self.pg_database.pg_query_pending_addresses()?;
+      if pending_addresses.is_empty() {
+        break;
+      }
+      let addresses = pending_addresses
+        .iter()
+        .map(|s| {
+          Address::from_str(s)
+            .unwrap()
+            .require_network(Network::Bitcoin)
+            .unwrap()
+        })
+        .collect();
+      self.update_addresses(height, &outpoint_to_balances, addresses)?;
 
-      let mut updater = Updater {
-        height: wtx
-          .open_table(HEIGHT_TO_BLOCK_HEADER)?
-          .range(0..)?
-          .next_back()
-          .transpose()?
-          .map(|(height, _header)| height.value() + 1)
-          .unwrap_or(0),
-        index: self,
-        outputs_cached: 0,
-        outputs_traversed: 0,
-        sat_ranges_since_flush: 0,
-        rs_updates: RsUpdates::default(),
-      };
+      self
+        .pg_database
+        .pg_mark_updated_addresses(pending_addresses)?;
 
-      match updater.update_index(wtx) {
-        Ok(ok) => return Ok(ok),
-        Err(err) => {
-          log::info!("{err}");
-
-          match err.downcast_ref() {
-            Some(&reorg::Error::Recoverable { height, depth }) => {
-              Reorg::handle_reorg(self, height, depth)?;
-            }
-            Some(&reorg::Error::Unrecoverable) => {
-              self
-                .unrecoverably_reorged
-                .store(true, atomic::Ordering::Relaxed);
-              return Err(anyhow!(reorg::Error::Unrecoverable));
-            }
-            _ => return Err(err),
-          };
-        }
+      loop_count += 1;
+      if loop_count >= 10 {
+        log::info!("Reached maximum loop count of 10, exiting...");
+        break;
       }
     }
+    let elapsed = start_time.elapsed();
+    log::info!("Address update completed in {:.2?}", elapsed);
+
+    Ok(())
   }
 
   pub fn export(&self, filename: &String, include_addresses: bool) -> Result {

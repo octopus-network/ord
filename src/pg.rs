@@ -732,6 +732,27 @@ impl PgDatabase {
     Ok(())
   }
 
+  pub fn pg_query_pending_addresses(&self) -> Result<Vec<String>> {
+    let query =
+      sqlx::query("SELECT address FROM public.pending_addresses WHERE updated = false ORDER BY address LIMIT 1000");
+    let rows = self
+      .runtime
+      .block_on(async { query.fetch_all(&self.pg_pool).await })?;
+
+    Ok(rows.iter().map(|row| row.get::<String, _>(0)).collect())
+  }
+
+  pub fn pg_mark_updated_addresses(&self, addresses: Vec<String>) -> Result {
+    let query =
+      sqlx::query("UPDATE public.pending_addresses SET updated = TRUE WHERE address IN ($1)")
+        .bind(addresses);
+    let _rows = self
+      .runtime
+      .block_on(async { query.execute(&self.pg_pool).await })?;
+
+    Ok(())
+  }
+
   pub fn pg_query_updated_runes(&self, block: u32) -> Result<HashSet<RuneId>> {
     let query =
       sqlx::query("SELECT rune_id FROM public.updated_runes WHERE block >= $1 AND reorg = FALSE")
