@@ -744,7 +744,7 @@ impl PgDatabase {
 
   pub fn pg_mark_updated_addresses(&self, addresses: Vec<String>) -> Result {
     let query =
-      sqlx::query("UPDATE public.pending_addresses SET updated = TRUE WHERE address IN ($1)")
+      sqlx::query("UPDATE public.pending_addresses SET updated = TRUE WHERE address = ANY($1)")
         .bind(addresses);
     let _rows = self
       .runtime
