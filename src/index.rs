@@ -2618,7 +2618,16 @@ impl Index {
     outpoint_to_rune_balances: &ReadOnlyTable<&OutPointValue, &[u8]>,
     updated_addresses: HashSet<Address>,
   ) -> Result {
+    let addresses_to_clear: Vec<String> = updated_addresses
+      .iter()
+      .map(|addr| addr.to_string())
+      .collect();
+    self
+      .pg_database
+      .pg_clear_rune_balance_addresses_chunked(addresses_to_clear, 1000)?;
+
     self.wait_for_fulcrum(height);
+
     let mut addresses = Vec::new();
     for address in updated_addresses.clone() {
       let unspent_list = self

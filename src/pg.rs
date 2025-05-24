@@ -608,6 +608,46 @@ impl PgDatabase {
     Ok(())
   }
 
+  fn pg_clear_rune_balance_addresses(&self, addresses: Vec<String>) -> Result {
+    if addresses.is_empty() {
+      return Ok(());
+    }
+
+    let query = sqlx::query("DELETE FROM public.address_rune_balance WHERE address = ANY($1)")
+      .bind(addresses);
+
+    self.runtime.block_on(async {
+      match query.execute(&self.pg_pool).await {
+        Ok(result) => {
+          log::debug!(
+            "Successfully deleted {} address rune balance records",
+            result.rows_affected()
+          );
+          Ok(())
+        }
+        Err(error) => {
+          log::error!("Failed to delete address rune balances. Error: {}", error);
+          Err(error.into())
+        }
+      }
+    })
+  }
+
+  pub fn pg_clear_rune_balance_addresses_chunked(
+    &self,
+    addresses: Vec<String>,
+    chunk_size: usize,
+  ) -> Result {
+    if addresses.is_empty() {
+      return Ok(());
+    }
+
+    for chunk in addresses.chunks(chunk_size) {
+      self.pg_clear_rune_balance_addresses(chunk.to_vec())?;
+    }
+    Ok(())
+  }
+
   fn pg_insert_updated_runes(&self, block: u32, updated_runes: HashSet<RuneId>) -> Result {
     if updated_runes.is_empty() {
       return Ok(());
