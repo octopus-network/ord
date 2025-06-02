@@ -21,7 +21,7 @@ pub struct RsTxIn {
   pub previous_output: OutPoint,
   pub value: Amount,
   pub address: Address,
-  pub runes: Vec<(RuneId, u128)>,
+  pub runes: Vec<(RuneId, String)>,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -29,7 +29,7 @@ pub struct RsTxOut {
   pub value: Amount,
   pub address: Option<Address>,
   pub op_return: Option<Artifact>,
-  pub runes: Vec<(RuneId, u128)>,
+  pub runes: Vec<(RuneId, String)>,
 }
 
 pub struct PgDatabase {
