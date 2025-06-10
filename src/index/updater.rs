@@ -361,6 +361,19 @@ impl Updater<'_> {
         .map(|x| x.value())
         .unwrap_or(0);
 
+      let reserved_runes = statistic_to_count
+        .get(&Statistic::ReservedRunes.into())?
+        .map(|x| x.value())
+        .unwrap_or(0);
+
+      log::info!(
+        "height: {}, reserved_runes: {}, runes: {}, outpoint_to_rune_balances: {}",
+        self.height,
+        reserved_runes,
+        runes,
+        outpoint_to_rune_balances.len()?
+      );
+
       let mut rune_updater = RuneUpdater {
         event_sender: self.index.event_sender.as_ref(),
         block_time: block.header.time,
@@ -437,6 +450,41 @@ impl Updater<'_> {
         "Previous block did not consume all inputs"
       );
     }
+
+    let sequence_number_to_satpoint = wtx.open_table(SEQUENCE_NUMBER_TO_SATPOINT)?;
+    let lost_sats = statistic_to_count
+      .get(&Statistic::LostSats.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+    let cursed_inscription_count = statistic_to_count
+      .get(&Statistic::CursedInscriptions.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+    let blessed_inscription_count = statistic_to_count
+      .get(&Statistic::BlessedInscriptions.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+    let unbound_inscriptions = statistic_to_count
+      .get(&Statistic::UnboundInscriptions.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+
+    log::info!(
+        "height: {}, sat_to_sequence_number: {}, sequence_number_to_children: {}, script_pubkey_to_outpoint: {}, inscription_number_to_sequence_number: {}, outpoint_to_utxo_entry: {}, sat_to_satpoint: {}, sequence_number_to_inscription_entry: {}, sequence_number_to_satpoint: {}, lost_sats: {}, cursed_inscription_count: {}, blessed_inscription_count: {}, unbound_inscriptions: {}",
+        self.height,
+        sat_to_sequence_number.len()?,
+        sequence_number_to_children.len()?,
+        script_pubkey_to_outpoint.len()?,
+        inscription_number_to_sequence_number.len()?,
+        outpoint_to_utxo_entry.len()?,
+        sat_to_satpoint.len()?,
+        sequence_number_to_inscription_entry.len()?,
+        sequence_number_to_satpoint.len()?,
+        lost_sats,
+        cursed_inscription_count,
+        blessed_inscription_count,
+        unbound_inscriptions,
+      );
 
     if !self.index.have_full_utxo_index() {
       // Send all missing input outpoints to be fetched
