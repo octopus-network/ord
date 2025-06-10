@@ -438,6 +438,57 @@ impl Updater<'_> {
       );
     }
 
+    let sequence_number_to_satpoint = wtx.open_table(SEQUENCE_NUMBER_TO_SATPOINT)?;
+    let lost_sats = statistic_to_count
+      .get(&Statistic::LostSats.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+    let cursed_inscriptions = statistic_to_count
+      .get(&Statistic::CursedInscriptions.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+    let blessed_inscriptions = statistic_to_count
+      .get(&Statistic::BlessedInscriptions.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+    let unbound_inscriptions = statistic_to_count
+      .get(&Statistic::UnboundInscriptions.key())?
+      .map(|x| x.value())
+      .unwrap_or(0);
+
+    log::info!(
+      "height: {},
+        sat_to_sequence_number: {},
+        sequence_number_to_children: {},
+        script_pubkey_to_outpoint: {},
+        height_to_last_sequence_number: {},
+        inscription_id_to_sequence_number: {},
+        inscription_number_to_sequence_number: {},
+        outpoint_to_utxo_entry: {},
+        sat_to_satpoint: {},
+        sequence_number_to_inscription_entry: {},
+        sequence_number_to_satpoint: {},
+        lost_sats: {},
+        cursed_inscriptions: {},
+        blessed_inscriptions: {},
+        unbound_inscriptions: {}",
+      self.height,
+      sat_to_sequence_number.iter()?.count(),
+      sequence_number_to_children.iter()?.count(),
+      script_pubkey_to_outpoint.iter()?.count(),
+      height_to_last_sequence_number.len()?,
+      inscription_id_to_sequence_number.len()?,
+      inscription_number_to_sequence_number.len()?,
+      outpoint_to_utxo_entry.len()?,
+      sat_to_satpoint.len()?,
+      sequence_number_to_inscription_entry.len()?,
+      sequence_number_to_satpoint.len()?,
+      lost_sats,
+      cursed_inscriptions,
+      blessed_inscriptions,
+      unbound_inscriptions,
+    );
+
     if !self.index.have_full_utxo_index() {
       // Send all missing input outpoints to be fetched
       let txids = block
