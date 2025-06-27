@@ -1,5 +1,6 @@
 use candid::{CandidType, Encode};
 use ic_agent::{export::Principal, Agent};
+use std::fmt::Debug;
 use {
   self::{
     entry::{
@@ -62,6 +63,9 @@ pub struct RuneBalance {
 pub struct RuneBalances {
   pub balances: Vec<RuneBalance>,
 }
+
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
+pub struct InscriptionNumber(pub i32);
 
 #[cfg(test)]
 pub(crate) mod testing;
@@ -748,52 +752,128 @@ impl Index {
 
     // let agent = tokio::runtime::Runtime::new()?.block_on(Self::create_agent("https://ic0.app", true))?;
     let runtime = tokio::runtime::Runtime::new()?;
-    // $ dfx info replica-port
-    let agent = runtime.block_on(async {
-      Self::create_agent("http://127.0.0.1:40849", false)
-        .await
-        .unwrap()
-    });
-    let runes_indexer = Principal::from_text("bkyz2-fmaaa-aaaaa-qaaaq-cai").unwrap();
+    // $ dfx info webserver-port
+    let agent =
+      runtime.block_on(async { Self::create_agent("https://ic0.app", true).await.unwrap() });
+    let runes_indexer = Principal::from_text("krhn4-hiaaa-aaaao-qkb3a-cai").unwrap();
 
     log::info!("exporting database tables to {filename}");
-    let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
-    let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
-    let transaction_id_to_rune = rtx.open_table(TRANSACTION_ID_TO_RUNE)?;
-    let outpoint_to_rune_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
-    let statistic_to_count = rtx.open_table(STATISTIC_TO_COUNT)?;
+
+    let sat_to_sequence_number = rtx.open_multimap_table(SAT_TO_SEQUENCE_NUMBER)?;
+    let sequence_number_to_children = rtx.open_multimap_table(SEQUENCE_NUMBER_TO_CHILDREN)?;
+    let script_pubkey_to_outpoint = rtx.open_multimap_table(SCRIPT_PUBKEY_TO_OUTPOINT)?;
     let height_to_block_header = rtx.open_table(HEIGHT_TO_BLOCK_HEADER)?;
+    let height_to_last_sequence_number = rtx.open_table(HEIGHT_TO_LAST_SEQUENCE_NUMBER)?;
+    // let home_inscriptions = rtx.open_table(HOME_INSCRIPTIONS)?;
+    let inscription_id_to_sequence_number = rtx.open_table(INSCRIPTION_ID_TO_SEQUENCE_NUMBER)?;
+    let inscription_number_to_sequence_number =
+      rtx.open_table(INSCRIPTION_NUMBER_TO_SEQUENCE_NUMBER)?;
+    // let outpoint_to_rune_balances = rtx.open_table(OUTPOINT_TO_RUNE_BALANCES)?;
+    let outpoint_to_utxo_entry = rtx.open_table(OUTPOINT_TO_UTXO_ENTRY)?;
+    // let rune_id_to_rune_entry = rtx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
+    // let rune_to_rune_id = rtx.open_table(RUNE_TO_RUNE_ID)?;
+    let sat_to_satpoint = rtx.open_table(SAT_TO_SATPOINT)?;
+    let sequence_number_to_inscription_entry =
+      rtx.open_table(SEQUENCE_NUMBER_TO_INSCRIPTION_ENTRY)?;
+    // let sequence_number_to_rune_id = rtx.open_table(SEQUENCE_NUMBER_TO_RUNE_ID)?;
+    let sequence_number_to_satpoint = rtx.open_table(SEQUENCE_NUMBER_TO_SATPOINT)?;
+    let statistic_to_count = rtx.open_table(STATISTIC_TO_COUNT)?;
+    // let transaction_id_to_rune = rtx.open_table(TRANSACTION_ID_TO_RUNE)?;
+
     writeln!(
       writer,
-      "# length of rune_id_to_rune_entry {}",
-      rune_id_to_rune_entry.len()?
-    )?; // 200
+      "# length of sat_to_sequence_number {}",
+      sat_to_sequence_number.len()?
+    )?;
     writeln!(
       writer,
-      "# length of rune_to_rune_id {}",
-      rune_to_rune_id.len()?
-    )?; // 201
+      "# length of sequence_number_to_children {}",
+      sequence_number_to_children.len()?
+    )?;
     writeln!(
       writer,
-      "# length of transaction_id_to_rune {}",
-      transaction_id_to_rune.len()?
-    )?; // 202
+      "# length of script_pubkey_to_outpoint {}",
+      script_pubkey_to_outpoint.len()?
+    )?;
     writeln!(
       writer,
-      "# length of outpoint_to_rune_balances {}",
-      outpoint_to_rune_balances.len()?
-    )?; // 203
+      "# length of height_to_block_header {}",
+      height_to_block_header.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of height_to_last_sequence_number {}",
+      height_to_last_sequence_number.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of inscription_id_to_sequence_number {}",
+      inscription_id_to_sequence_number.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of inscription_number_to_sequence_number {}",
+      inscription_number_to_sequence_number.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of outpoint_to_utxo_entry {}",
+      outpoint_to_utxo_entry.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of sat_to_satpoint {}",
+      sat_to_satpoint.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of sequence_number_to_inscription_entry {}",
+      sequence_number_to_inscription_entry.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of sequence_number_to_satpoint {}",
+      sequence_number_to_satpoint.len()?
+    )?;
+    writeln!(
+      writer,
+      "# length of statistic_to_count {}",
+      statistic_to_count.len()?
+    )?;
+
+    // writeln!(
+    //   writer,
+    //   "# length of rune_id_to_rune_entry {}",
+    //   rune_id_to_rune_entry.len()?
+    // )?; // 200
+    // writeln!(
+    //   writer,
+    //   "# length of rune_to_rune_id {}",
+    //   rune_to_rune_id.len()?
+    // )?; // 201
+    // writeln!(
+    //   writer,
+    //   "# length of transaction_id_to_rune {}",
+    //   transaction_id_to_rune.len()?
+    // )?; // 202
+    // writeln!(
+    //   writer,
+    //   "# length of outpoint_to_rune_balances {}",
+    //   outpoint_to_rune_balances.len()?
+    // )?; // 203
 
     writeln!(writer, "# start time {}", Utc::now())?;
 
-    let reserved_runes = statistic_to_count
-      .get(&Statistic::ReservedRunes.into())?
-      .map(|entry| entry.value())
-      .unwrap_or_default();
-    let runes = statistic_to_count
-      .get(&Statistic::Runes.key())?
-      .unwrap()
-      .value();
+    // let reserved_runes = statistic_to_count
+    //   .get(&Statistic::ReservedRunes.into())?
+    //   .map(|entry| entry.value())
+    //   .unwrap_or_default();
+    // let runes = statistic_to_count
+    //   .get(&Statistic::Runes.key())?
+    //   .unwrap()
+    //   .value();
+
+    // 203
     let latest_block = height_to_block_header
       .range(0..)?
       .next_back()
@@ -801,12 +881,13 @@ impl Index {
       .map(|(height, header)| (height.value(), Header::load(*header.value())))
       .unwrap();
 
-    writeln!(writer, "# reserved_runes {}", reserved_runes)?;
-    writeln!(writer, "# runes {}", runes)?;
+    // writeln!(writer, "# reserved_runes {}", reserved_runes)?;
+    // writeln!(writer, "# runes {}", runes)?;
     writeln!(writer, "# latest_block {:?}", latest_block)?;
+    writer.flush()?;
 
-    let bytes = bincode::serialize(&(reserved_runes, runes, latest_block))?;
-    let mut final_bytes = vec![204u8];
+    let bytes = bincode::serialize(&latest_block)?;
+    let mut final_bytes = vec![203u8];
     final_bytes.extend_from_slice(&bytes);
 
     let compressed = lz4::block::compress(&final_bytes, None, true)?;
@@ -820,92 +901,326 @@ impl Index {
         .unwrap();
     });
 
-    let a = rune_id_to_rune_entry
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| (RuneId::load(x.0.value()), RuneEntry::load(x.1.value())))
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      a,
-      200,
-      "rune_id_to_rune_entry",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // 211
+    let lost_sats = statistic_to_count
+      .get(&Statistic::LostSats.key())?
+      .map(|entry| entry.value())
+      .unwrap_or_default();
+    writeln!(writer, "# lost_sats {}", lost_sats)?;
 
-    let b = rune_to_rune_id
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| (Rune::load(x.0.value()), RuneId::load(x.1.value())))
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      b,
-      201,
-      "rune_to_rune_id",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    let cursed_inscriptions = statistic_to_count
+      .get(&Statistic::CursedInscriptions.key())?
+      .map(|entry| entry.value())
+      .unwrap_or_default();
+    writeln!(writer, "# cursed_inscriptions {}", cursed_inscriptions)?;
 
-    let c = transaction_id_to_rune
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| (Txid::load(*x.0.value()), x.1.value()))
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      c,
-      202,
-      "transaction_id_to_rune",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    let blessed_inscriptions = statistic_to_count
+      .get(&Statistic::BlessedInscriptions.key())?
+      .map(|entry| entry.value())
+      .unwrap_or_default();
+    writeln!(writer, "# blessed_inscriptions {}", blessed_inscriptions)?;
 
-    let d = outpoint_to_rune_balances
+    let unbound_inscriptions = statistic_to_count
+      .get(&Statistic::UnboundInscriptions.key())?
+      .map(|entry| entry.value())
+      .unwrap_or_default();
+    writeln!(writer, "# unbound_inscriptions {}", unbound_inscriptions)?;
+
+    let bytes = bincode::serialize(&(
+      lost_sats,
+      cursed_inscriptions,
+      blessed_inscriptions,
+      unbound_inscriptions,
+    ))?;
+    let mut final_bytes = vec![211u8];
+    final_bytes.extend_from_slice(&bytes);
+
+    let compressed = lz4::block::compress(&final_bytes, None, true)?;
+
+    runtime.block_on(async {
+      agent
+        .update(&runes_indexer, "load")
+        .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+        .call_and_wait()
+        .await
+        .unwrap();
+    });
+
+    // 201 u32 Vec<u32>
+    let sequence_number_to_children_data: Vec<(u32, Vec<u32>)> = sequence_number_to_children
       .iter()?
       .map(|x| x.unwrap())
       .map(|x| {
-        let mut rune_balances = RuneBalances { balances: vec![] };
-        let mut op_height: u32 = 0;
-
-        let balances_buffer = x.1.value();
-
-        let mut i = 0;
-        while i < balances_buffer.len() {
-          let ((id, amount, height), length) =
-            Index::decode_rune_balance(&balances_buffer[i..]).unwrap();
-          i += length;
-          op_height = height as u32;
-          rune_balances.balances.push(RuneBalance {
-            rune_id: id,
-            balance: amount,
-          });
-        }
-
-        (OutPoint::load(*x.0.value()), rune_balances, op_height)
+        (
+          x.0.value(),
+          x.1
+            .into_iter()
+            .map(|x| x.unwrap().value())
+            .collect::<Vec<_>>(),
+        )
       })
       .collect::<Vec<_>>();
 
     self.process_chunks(
-      d,
-      203,
-      "outpoint_to_rune_balances",
+      sequence_number_to_children_data,
+      201,
+      "sequence_number_to_children",
       &mut writer,
       &runtime,
       &agent,
       &runes_indexer,
     )?;
+
+    // 204 u32 u32
+    let height_to_last_sequence_number_data: Vec<(u32, u32)> = height_to_last_sequence_number
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| (x.0.value(), x.1.value()))
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      height_to_last_sequence_number_data,
+      204,
+      "height_to_last_sequence_number",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 208 u64 SatPoint
+    let sat_to_satpoint_data: Vec<(u64, SatPoint)> = sat_to_satpoint
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      sat_to_satpoint_data,
+      208,
+      "sat_to_satpoint",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 200 u64, Vec<u32>
+    let sat_to_sequence_number_data: Vec<(u64, Vec<u32>)> = sat_to_sequence_number
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| {
+        (
+          x.0.value(),
+          x.1
+            .into_iter()
+            .map(|x| x.unwrap().value())
+            .collect::<Vec<_>>(),
+        )
+      })
+      .collect::<Vec<_>>();
+
+    self.process_chunks(
+      sat_to_sequence_number_data,
+      200,
+      "sat_to_sequence_number",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 205 InscriptionId u32
+    let inscription_id_to_sequence_number_data: Vec<(InscriptionId, u32)> =
+      inscription_id_to_sequence_number
+        .iter()?
+        .map(|x| x.unwrap())
+        .map(|x| (InscriptionId::load(x.0.value()), x.1.value()))
+        .collect::<Vec<_>>();
+    self.process_chunks(
+      inscription_id_to_sequence_number_data,
+      205,
+      "inscription_id_to_sequence_number",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 206 InscriptionNumber u32
+    let inscription_number_to_sequence_number_data: Vec<(InscriptionNumber, u32)> =
+      inscription_number_to_sequence_number
+        .iter()?
+        .map(|x| x.unwrap())
+        .map(|x| (InscriptionNumber(x.0.value()), x.1.value()))
+        .collect::<Vec<_>>();
+    self.process_chunks(
+      inscription_number_to_sequence_number_data,
+      206,
+      "inscription_number_to_sequence_number",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 209 u32 InscriptionEntry
+    let sequence_number_to_inscription_entry_data: Vec<(u32, InscriptionEntry)> =
+      sequence_number_to_inscription_entry
+        .iter()?
+        .map(|x| x.unwrap())
+        .map(|x| (x.0.value(), InscriptionEntry::load(x.1.value())))
+        .collect::<Vec<_>>();
+    self.process_chunks(
+      sequence_number_to_inscription_entry_data,
+      209,
+      "sequence_number_to_inscription_entry",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 210 u32 SatPoint
+    let sequence_number_to_satpoint_data: Vec<(u32, SatPoint)> = sequence_number_to_satpoint
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      sequence_number_to_satpoint_data,
+      210,
+      "sequence_number_to_satpoint",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 202 Vec<u8> Vec<OutPoint>
+    let script_pubkey_to_outpoint_data: Vec<(Vec<u8>, Vec<OutPoint>)> = script_pubkey_to_outpoint
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| {
+        (
+          x.0.value().to_vec(),
+          x.1
+            .into_iter()
+            .map(|x| OutPoint::load(x.unwrap().value()))
+            .collect::<Vec<_>>(),
+        )
+      })
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      script_pubkey_to_outpoint_data,
+      202,
+      "script_pubkey_to_outpoint",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 207 OutPoint UtxoEntryBuf
+    let outpoint_to_utxo_entry_data: Vec<(OutPoint, UtxoEntryBuf)> = outpoint_to_utxo_entry
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| (OutPoint::load(*x.0.value()), x.1.value().to_buf()))
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      outpoint_to_utxo_entry_data,
+      207,
+      "outpoint_to_utxo_entry",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // let a = rune_id_to_rune_entry
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| (RuneId::load(x.0.value()), RuneEntry::load(x.1.value())))
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   a,
+    //   200,
+    //   "rune_id_to_rune_entry",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
+
+    // let b = rune_to_rune_id
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| (Rune::load(x.0.value()), RuneId::load(x.1.value())))
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   b,
+    //   201,
+    //   "rune_to_rune_id",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
+
+    // let c = transaction_id_to_rune
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| (Txid::load(*x.0.value()), x.1.value()))
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   c,
+    //   202,
+    //   "transaction_id_to_rune",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
+
+    // let d = outpoint_to_rune_balances
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| {
+    //     let mut rune_balances = RuneBalances { balances: vec![] };
+    //     let mut op_height: u32 = 0;
+
+    //     let balances_buffer = x.1.value();
+
+    //     let mut i = 0;
+    //     while i < balances_buffer.len() {
+    //       let ((id, amount, height), length) =
+    //         Index::decode_rune_balance(&balances_buffer[i..]).unwrap();
+    //       i += length;
+    //       op_height = height as u32;
+    //       rune_balances.balances.push(RuneBalance {
+    //         rune_id: id,
+    //         balance: amount,
+    //       });
+    //     }
+
+    //     (OutPoint::load(*x.0.value()), rune_balances, op_height)
+    //   })
+    //   .collect::<Vec<_>>();
+
+    // self.process_chunks(
+    //   d,
+    //   203,
+    //   "outpoint_to_rune_balances",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
     writeln!(writer, "# end time {}", Utc::now())?;
     writer.flush()?;
     Ok(())
   }
 
-  fn process_chunks<T: Serialize + Clone>(
+  fn process_chunks<T: Serialize + Clone + Debug>(
     &self,
     data: Vec<T>,
     table_id: u8,
@@ -915,9 +1230,12 @@ impl Index {
     agent: &Agent,
     runes_indexer: &Principal,
   ) -> Result<()> {
-    let payload_size: usize = 1_700_000;
+    // let payload_size: usize = 1_700_000;
     let mut cache = vec![];
-    for (i, chunk) in data.chunks(1000).enumerate() {
+    let mut chunk_iter = data.chunks(1000).enumerate();
+
+    while let Some((i, chunk)) = chunk_iter.next() {
+      // 预取：先添加这个 chunk 到 cache
       cache.append(&mut chunk.to_vec());
       let bytes = bincode::serialize(&cache)?;
       let mut final_bytes = vec![table_id];
@@ -940,39 +1258,142 @@ impl Index {
       //   compressed.len()
       // )?;
 
-      if (compressed.len() > payload_size)
-        || (table_name == "outpoint_to_rune_balances" && cache.len() > 25000)
-        || (table_name == "rune_to_rune_id" && cache.len() > 70000)
-      {
-        assert!(compressed.len() < 1_980_000);
-        writeln!(writer, "# sending chunk {}, len: {} ", i + 1, cache.len())?;
-        runtime.block_on(async {
-          agent
-            .update(runes_indexer, "load")
-            .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
-            .call_and_wait()
-            .await
-            .unwrap();
-        });
-        cache.clear();
+      // 检查压缩后的大小是否超过限制
+      if compressed.len() > 1_990_000 {
+        writeln!(writer, "compressed len: {}", compressed.len())?;
+        // 超过限制，回退这个 chunk
+        let chunk_len = chunk.len();
+        cache.truncate(cache.len() - chunk_len);
+
+        // 发送回退后的 cache（如果非空）
+        if !cache.is_empty() {
+          let bytes = bincode::serialize(&cache)?;
+          let mut final_bytes = vec![table_id];
+          final_bytes.extend_from_slice(&bytes);
+          let compressed = lz4::block::compress(&final_bytes, None, true)?;
+          if compressed.len() > 1_990_000 {
+            writeln!(
+              writer,
+              "# sending {} chunk {} in batches, len: {}, compressed len: {}",
+              table_name,
+              i + 1,
+              cache.len(),
+              compressed.len()
+            )?;
+            assert!(table_id == 202 || table_id == 207);
+            // 将压缩数据按每1,990,000字节分块发送
+            let chunk_size = 1_990_000;
+            let mut offset = 0;
+            let mut chunk_index = 0;
+
+            while offset < compressed.len() {
+              let end = std::cmp::min(offset + chunk_size, compressed.len());
+              let mut chunk_data = vec![255];
+              chunk_data.extend_from_slice(&compressed[offset..end]);
+
+              writeln!(
+                writer,
+                "# sending {} chunk {} (split {})",
+                table_name,
+                i + 1,
+                chunk_index + 1,
+              )?;
+
+              runtime.block_on(async {
+                agent
+                  .update(runes_indexer, "load")
+                  .with_arg(Encode!(&LoadArgs { data: chunk_data }).unwrap())
+                  .call_and_wait()
+                  .await
+                  .unwrap();
+              });
+
+              offset = end;
+              chunk_index += 1;
+            }
+            runtime.block_on(async {
+              agent
+                .update(runes_indexer, "load")
+                .with_arg(
+                  Encode!(&LoadArgs {
+                    data: vec![0, table_id]
+                  })
+                  .unwrap(),
+                )
+                .call_and_wait()
+                .await
+                .unwrap();
+            });
+
+            // for data in cache.iter() {
+            //   let bytes = bincode::serialize(&data)?;
+            //   let mut final_bytes = vec![table_id];
+            //   final_bytes.extend_from_slice(&bytes);
+            //   let compressed = lz4::block::compress(&final_bytes, None, true)?;
+            //   if compressed.len() > 1_990_000 {
+            //     writeln!(writer, "compressed len: {}, data: {:?}", compressed.len(), data)?;
+            //   }
+            // }
+          } else {
+            writeln!(
+              writer,
+              "# sending {} chunk {} (after rollback), len: {}, compressed len: {}",
+              table_name,
+              i + 1,
+              cache.len(),
+              compressed.len()
+            )?;
+            runtime.block_on(async {
+              agent
+                .update(runes_indexer, "load")
+                .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+                .call_and_wait()
+                .await
+                .unwrap();
+            });
+          }
+          cache.clear();
+        }
+
+        // 重新添加这个 chunk（现在 cache 是空的）
+        cache.append(&mut chunk.to_vec());
+        continue;
       }
     }
 
-    if !cache.is_empty() {
-      let bytes = bincode::serialize(&cache)?;
-      let mut final_bytes = vec![table_id];
-      final_bytes.extend_from_slice(&bytes);
-      let compressed = lz4::block::compress(&final_bytes, None, true)?;
-      writeln!(writer, "# sending last chunk, len: {} ", cache.len())?;
-      runtime.block_on(async {
-        agent
-          .update(runes_indexer, "load")
-          .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
-          .call_and_wait()
-          .await
-          .unwrap();
-      });
-    }
+    // 检查是否需要发送（基于原有条件）
+    // if (compressed.len() > payload_size)
+    //     || (table_name == "outpoint_to_rune_balances" && cache.len() > 25000)
+    //     || (table_name == "rune_to_rune_id" && cache.len() > 70000)
+    //   {
+    //     writeln!(writer, "# sending {} chunk {}, len: {}, compressed len: {}", table_name, i + 1, cache.len(), compressed.len())?;
+    //     runtime.block_on(async {
+    //       agent
+    //         .update(runes_indexer, "load")
+    //         .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+    //         .call_and_wait()
+    //         .await
+    //         .unwrap();
+    //     });
+    //     cache.clear();
+    //   }
+    // }
+
+    // if !cache.is_empty() {
+    //   let bytes = bincode::serialize(&cache)?;
+    //   let mut final_bytes = vec![table_id];
+    //   final_bytes.extend_from_slice(&bytes);
+    //   let compressed = lz4::block::compress(&final_bytes, None, true)?;
+    //   writeln!(writer, "# sending last chunk, len: {} ", cache.len())?;
+    //   runtime.block_on(async {
+    //     agent
+    //       .update(runes_indexer, "load")
+    //       .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+    //       .call_and_wait()
+    //       .await
+    //       .unwrap();
+    //   });
+    // }
     Ok(())
   }
 

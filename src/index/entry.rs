@@ -287,7 +287,7 @@ impl Entry for RuneId {
   }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, serde::Serialize)]
 pub struct InscriptionEntry {
   pub charms: u16,
   pub fee: u64,

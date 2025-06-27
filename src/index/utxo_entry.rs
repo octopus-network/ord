@@ -186,14 +186,14 @@ impl<'a> ParsedUtxoEntry<'a> {
 }
 
 #[cfg(debug_assertions)]
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, serde::Serialize, Clone)]
 enum State {
   NeedSats,
   NeedScriptPubkey,
   Valid,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, Clone)]
 pub struct UtxoEntryBuf {
   vec: Vec<u8>,
   #[cfg(debug_assertions)]
