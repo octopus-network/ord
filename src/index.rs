@@ -971,169 +971,169 @@ impl Index {
       &runes_indexer,
     )?;
 
-    // 204 u32 u32
-    let height_to_last_sequence_number_data: Vec<(u32, u32)> = height_to_last_sequence_number
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| (x.0.value(), x.1.value()))
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      height_to_last_sequence_number_data,
-      204,
-      "height_to_last_sequence_number",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 204 u32 u32
+    // let height_to_last_sequence_number_data: Vec<(u32, u32)> = height_to_last_sequence_number
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| (x.0.value(), x.1.value()))
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   height_to_last_sequence_number_data,
+    //   204,
+    //   "height_to_last_sequence_number",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 208 u64 SatPoint
-    let sat_to_satpoint_data: Vec<(u64, SatPoint)> = sat_to_satpoint
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      sat_to_satpoint_data,
-      208,
-      "sat_to_satpoint",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 208 u64 SatPoint
+    // let sat_to_satpoint_data: Vec<(u64, SatPoint)> = sat_to_satpoint
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   sat_to_satpoint_data,
+    //   208,
+    //   "sat_to_satpoint",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 200 u64, Vec<u32>
-    let sat_to_sequence_number_data: Vec<(u64, Vec<u32>)> = sat_to_sequence_number
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| {
-        (
-          x.0.value(),
-          x.1
-            .into_iter()
-            .map(|x| x.unwrap().value())
-            .collect::<Vec<_>>(),
-        )
-      })
-      .collect::<Vec<_>>();
+    // // 200 u64, Vec<u32>
+    // let sat_to_sequence_number_data: Vec<(u64, Vec<u32>)> = sat_to_sequence_number
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| {
+    //     (
+    //       x.0.value(),
+    //       x.1
+    //         .into_iter()
+    //         .map(|x| x.unwrap().value())
+    //         .collect::<Vec<_>>(),
+    //     )
+    //   })
+    //   .collect::<Vec<_>>();
 
-    self.process_chunks(
-      sat_to_sequence_number_data,
-      200,
-      "sat_to_sequence_number",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // self.process_chunks(
+    //   sat_to_sequence_number_data,
+    //   200,
+    //   "sat_to_sequence_number",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 205 InscriptionId u32
-    let inscription_id_to_sequence_number_data: Vec<(InscriptionId, u32)> =
-      inscription_id_to_sequence_number
-        .iter()?
-        .map(|x| x.unwrap())
-        .map(|x| (InscriptionId::load(x.0.value()), x.1.value()))
-        .collect::<Vec<_>>();
-    self.process_chunks(
-      inscription_id_to_sequence_number_data,
-      205,
-      "inscription_id_to_sequence_number",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 205 InscriptionId u32
+    // let inscription_id_to_sequence_number_data: Vec<(InscriptionId, u32)> =
+    //   inscription_id_to_sequence_number
+    //     .iter()?
+    //     .map(|x| x.unwrap())
+    //     .map(|x| (InscriptionId::load(x.0.value()), x.1.value()))
+    //     .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   inscription_id_to_sequence_number_data,
+    //   205,
+    //   "inscription_id_to_sequence_number",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 206 InscriptionNumber u32
-    let inscription_number_to_sequence_number_data: Vec<(InscriptionNumber, u32)> =
-      inscription_number_to_sequence_number
-        .iter()?
-        .map(|x| x.unwrap())
-        .map(|x| (InscriptionNumber(x.0.value()), x.1.value()))
-        .collect::<Vec<_>>();
-    self.process_chunks(
-      inscription_number_to_sequence_number_data,
-      206,
-      "inscription_number_to_sequence_number",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 206 InscriptionNumber u32
+    // let inscription_number_to_sequence_number_data: Vec<(InscriptionNumber, u32)> =
+    //   inscription_number_to_sequence_number
+    //     .iter()?
+    //     .map(|x| x.unwrap())
+    //     .map(|x| (InscriptionNumber(x.0.value()), x.1.value()))
+    //     .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   inscription_number_to_sequence_number_data,
+    //   206,
+    //   "inscription_number_to_sequence_number",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 209 u32 InscriptionEntry
-    let sequence_number_to_inscription_entry_data: Vec<(u32, InscriptionEntry)> =
-      sequence_number_to_inscription_entry
-        .iter()?
-        .map(|x| x.unwrap())
-        .map(|x| (x.0.value(), InscriptionEntry::load(x.1.value())))
-        .collect::<Vec<_>>();
-    self.process_chunks(
-      sequence_number_to_inscription_entry_data,
-      209,
-      "sequence_number_to_inscription_entry",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 209 u32 InscriptionEntry
+    // let sequence_number_to_inscription_entry_data: Vec<(u32, InscriptionEntry)> =
+    //   sequence_number_to_inscription_entry
+    //     .iter()?
+    //     .map(|x| x.unwrap())
+    //     .map(|x| (x.0.value(), InscriptionEntry::load(x.1.value())))
+    //     .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   sequence_number_to_inscription_entry_data,
+    //   209,
+    //   "sequence_number_to_inscription_entry",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 210 u32 SatPoint
-    let sequence_number_to_satpoint_data: Vec<(u32, SatPoint)> = sequence_number_to_satpoint
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      sequence_number_to_satpoint_data,
-      210,
-      "sequence_number_to_satpoint",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 210 u32 SatPoint
+    // let sequence_number_to_satpoint_data: Vec<(u32, SatPoint)> = sequence_number_to_satpoint
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   sequence_number_to_satpoint_data,
+    //   210,
+    //   "sequence_number_to_satpoint",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 202 Vec<u8> Vec<OutPoint>
-    let script_pubkey_to_outpoint_data: Vec<(Vec<u8>, Vec<OutPoint>)> = script_pubkey_to_outpoint
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| {
-        (
-          x.0.value().to_vec(),
-          x.1
-            .into_iter()
-            .map(|x| OutPoint::load(x.unwrap().value()))
-            .collect::<Vec<_>>(),
-        )
-      })
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      script_pubkey_to_outpoint_data,
-      202,
-      "script_pubkey_to_outpoint",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 202 Vec<u8> Vec<OutPoint>
+    // let script_pubkey_to_outpoint_data: Vec<(Vec<u8>, Vec<OutPoint>)> = script_pubkey_to_outpoint
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| {
+    //     (
+    //       x.0.value().to_vec(),
+    //       x.1
+    //         .into_iter()
+    //         .map(|x| OutPoint::load(x.unwrap().value()))
+    //         .collect::<Vec<_>>(),
+    //     )
+    //   })
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   script_pubkey_to_outpoint_data,
+    //   202,
+    //   "script_pubkey_to_outpoint",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
-    // 207 OutPoint UtxoEntryBuf
-    let outpoint_to_utxo_entry_data: Vec<(OutPoint, UtxoEntryBuf)> = outpoint_to_utxo_entry
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| (OutPoint::load(*x.0.value()), x.1.value().to_buf()))
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      outpoint_to_utxo_entry_data,
-      207,
-      "outpoint_to_utxo_entry",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
+    // // 207 OutPoint UtxoEntryBuf
+    // let outpoint_to_utxo_entry_data: Vec<(OutPoint, UtxoEntryBuf)> = outpoint_to_utxo_entry
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| (OutPoint::load(*x.0.value()), x.1.value().to_buf()))
+    //   .collect::<Vec<_>>();
+    // self.process_chunks(
+    //   outpoint_to_utxo_entry_data,
+    //   207,
+    //   "outpoint_to_utxo_entry",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
 
     // let a = rune_id_to_rune_entry
     //   .iter()?
