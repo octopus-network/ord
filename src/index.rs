@@ -1232,7 +1232,9 @@ impl Index {
   ) -> Result<()> {
     // let payload_size: usize = 1_700_000;
     let mut cache = vec![];
-    let mut chunk_iter = data.chunks(1000).enumerate();
+    let chunks: Vec<_> = data.chunks(1000).collect();
+    let total_chunks = chunks.len();
+    let mut chunk_iter = chunks.into_iter().enumerate();
 
     while let Some((i, chunk)) = chunk_iter.next() {
       // 预取：先添加这个 chunk 到 cache
@@ -1258,8 +1260,9 @@ impl Index {
       //   compressed.len()
       // )?;
 
-      // 检查压缩后的大小是否超过限制
-      if compressed.len() > 1_990_000 {
+      // 检查压缩后的大小是否超过限制，但如果是最后一个chunk则跳过检查
+      let is_last_chunk = i == total_chunks - 1;
+      if compressed.len() > 1_990_000 && !is_last_chunk {
         writeln!(writer, "compressed len: {}", compressed.len())?;
         // 超过限制，回退这个 chunk
         let chunk_len = chunk.len();
@@ -1359,6 +1362,37 @@ impl Index {
         cache.append(&mut chunk.to_vec());
         continue;
       }
+
+      // 如果是最后一个chunk或者大小在限制内，直接发送
+      if is_last_chunk {
+        writeln!(
+          writer,
+          "# sending {} last chunk {}, len: {}, compressed len: {}",
+          table_name,
+          i + 1,
+          cache.len(),
+          compressed.len()
+        )?;
+      } else {
+        writeln!(
+          writer,
+          "# sending {} chunk {}, len: {}, compressed len: {}",
+          table_name,
+          i + 1,
+          cache.len(),
+          compressed.len()
+        )?;
+      }
+
+      runtime.block_on(async {
+        agent
+          .update(runes_indexer, "load")
+          .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+          .call_and_wait()
+          .await
+          .unwrap();
+      });
+      cache.clear();
     }
 
     // 检查是否需要发送（基于原有条件）
