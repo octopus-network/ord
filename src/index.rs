@@ -1095,45 +1095,45 @@ impl Index {
     //   &runes_indexer,
     // )?;
 
-    // 202 Vec<u8> Vec<OutPoint>
-    let script_pubkey_to_outpoint_data: Vec<(Vec<u8>, Vec<OutPoint>)> = script_pubkey_to_outpoint
-      .iter()?
-      .map(|x| x.unwrap())
-      .map(|x| {
-        (
-          x.0.value().to_vec(),
-          x.1
-            .into_iter()
-            .map(|x| OutPoint::load(x.unwrap().value()))
-            .collect::<Vec<_>>(),
-        )
-      })
-      .collect::<Vec<_>>();
-    self.process_chunks(
-      script_pubkey_to_outpoint_data,
-      202,
-      "script_pubkey_to_outpoint",
-      &mut writer,
-      &runtime,
-      &agent,
-      &runes_indexer,
-    )?;
-
-    // // 207 OutPoint UtxoEntryBuf
-    // let outpoint_to_utxo_entry_data: Vec<(OutPoint, UtxoEntryBuf)> = outpoint_to_utxo_entry
+    // // 202 Vec<u8> Vec<OutPoint>
+    // let script_pubkey_to_outpoint_data: Vec<(Vec<u8>, Vec<OutPoint>)> = script_pubkey_to_outpoint
     //   .iter()?
     //   .map(|x| x.unwrap())
-    //   .map(|x| (OutPoint::load(*x.0.value()), x.1.value().to_buf()))
+    //   .map(|x| {
+    //     (
+    //       x.0.value().to_vec(),
+    //       x.1
+    //         .into_iter()
+    //         .map(|x| OutPoint::load(x.unwrap().value()))
+    //         .collect::<Vec<_>>(),
+    //     )
+    //   })
     //   .collect::<Vec<_>>();
     // self.process_chunks(
-    //   outpoint_to_utxo_entry_data,
-    //   207,
-    //   "outpoint_to_utxo_entry",
+    //   script_pubkey_to_outpoint_data,
+    //   202,
+    //   "script_pubkey_to_outpoint",
     //   &mut writer,
     //   &runtime,
     //   &agent,
     //   &runes_indexer,
     // )?;
+
+    // 207 OutPoint UtxoEntryBuf
+    let outpoint_to_utxo_entry_data: Vec<(OutPoint, UtxoEntryBuf)> = outpoint_to_utxo_entry
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| (OutPoint::load(*x.0.value()), x.1.value().to_buf()))
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      outpoint_to_utxo_entry_data,
+      207,
+      "outpoint_to_utxo_entry",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
 
     // let a = rune_id_to_rune_entry
     //   .iter()?
@@ -1277,9 +1277,9 @@ impl Index {
           if compressed.len() > 1_990_000 {
             writeln!(
               writer,
-              "# sending {} chunk {} in batches, len: {}, compressed len: {}",
+              "# sending1 {} chunk {} in batches, len: {}, compressed len: {}",
               table_name,
-              i + 1,
+              i,
               cache.len(),
               compressed.len()
             )?;
@@ -1298,8 +1298,8 @@ impl Index {
                 writer,
                 "# sending {} chunk {} (split {})",
                 table_name,
-                i + 1,
-                chunk_index + 1,
+                i,
+                chunk_index,
               )?;
 
               runtime.block_on(async {
@@ -1342,7 +1342,7 @@ impl Index {
               writer,
               "# sending {} chunk {} (after rollback), len: {}, compressed len: {}",
               table_name,
-              i + 1,
+              i,
               cache.len(),
               compressed.len()
             )?;
@@ -1369,30 +1369,20 @@ impl Index {
           writer,
           "# sending {} last chunk {}, len: {}, compressed len: {}",
           table_name,
-          i + 1,
+          i,
           cache.len(),
           compressed.len()
         )?;
-      } else {
-        writeln!(
-          writer,
-          "# sending {} chunk {}, len: {}, compressed len: {}",
-          table_name,
-          i + 1,
-          cache.len(),
-          compressed.len()
-        )?;
+        runtime.block_on(async {
+          agent
+            .update(runes_indexer, "load")
+            .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+            .call_and_wait()
+            .await
+            .unwrap();
+        });
+        cache.clear();
       }
-
-      runtime.block_on(async {
-        agent
-          .update(runes_indexer, "load")
-          .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
-          .call_and_wait()
-          .await
-          .unwrap();
-      });
-      cache.clear();
     }
 
     // 检查是否需要发送（基于原有条件）
