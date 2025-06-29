@@ -783,17 +783,17 @@ impl Index {
     writeln!(
       writer,
       "# length of sat_to_sequence_number {}",
-      sat_to_sequence_number.len()?
+      sat_to_sequence_number.iter()?.count()
     )?;
     writeln!(
       writer,
       "# length of sequence_number_to_children {}",
-      sequence_number_to_children.len()?
+      sequence_number_to_children.iter()?.count()
     )?;
     writeln!(
       writer,
       "# length of script_pubkey_to_outpoint {}",
-      script_pubkey_to_outpoint.len()?
+      script_pubkey_to_outpoint.iter()?.count()
     )?;
     writeln!(
       writer,
@@ -873,135 +873,135 @@ impl Index {
     //   .unwrap()
     //   .value();
 
-    // 203
-    let latest_block = height_to_block_header
-      .range(0..)?
-      .next_back()
-      .transpose()?
-      .map(|(height, header)| (height.value(), Header::load(*header.value())))
-      .unwrap();
+    // // 203
+    // let latest_block = height_to_block_header
+    //   .range(0..)?
+    //   .next_back()
+    //   .transpose()?
+    //   .map(|(height, header)| (height.value(), Header::load(*header.value())))
+    //   .unwrap();
 
-    // writeln!(writer, "# reserved_runes {}", reserved_runes)?;
-    // writeln!(writer, "# runes {}", runes)?;
-    writeln!(writer, "# latest_block {:?}", latest_block)?;
-    writer.flush()?;
+    // // writeln!(writer, "# reserved_runes {}", reserved_runes)?;
+    // // writeln!(writer, "# runes {}", runes)?;
+    // writeln!(writer, "# latest_block {:?}", latest_block)?;
+    // writer.flush()?;
 
-    let bytes = bincode::serialize(&latest_block)?;
-    let mut final_bytes = vec![203u8];
-    final_bytes.extend_from_slice(&bytes);
+    // let bytes = bincode::serialize(&latest_block)?;
+    // let mut final_bytes = vec![203u8];
+    // final_bytes.extend_from_slice(&bytes);
 
-    let compressed = lz4::block::compress(&final_bytes, None, true)?;
+    // let compressed = lz4::block::compress(&final_bytes, None, true)?;
 
-    runtime.block_on(async {
-      agent
-        .update(&runes_indexer, "load")
-        .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
-        .call_and_wait()
-        .await
-        .unwrap();
-    });
+    // runtime.block_on(async {
+    //   agent
+    //     .update(&runes_indexer, "load")
+    //     .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+    //     .call_and_wait()
+    //     .await
+    //     .unwrap();
+    // });
 
-    // 211
-    let lost_sats = statistic_to_count
-      .get(&Statistic::LostSats.key())?
-      .map(|entry| entry.value())
-      .unwrap_or_default();
-    writeln!(writer, "# lost_sats {}", lost_sats)?;
+    // // 211
+    // let lost_sats = statistic_to_count
+    //   .get(&Statistic::LostSats.key())?
+    //   .map(|entry| entry.value())
+    //   .unwrap_or_default();
+    // writeln!(writer, "# lost_sats {}", lost_sats)?;
 
-    let cursed_inscriptions = statistic_to_count
-      .get(&Statistic::CursedInscriptions.key())?
-      .map(|entry| entry.value())
-      .unwrap_or_default();
-    writeln!(writer, "# cursed_inscriptions {}", cursed_inscriptions)?;
+    // let cursed_inscriptions = statistic_to_count
+    //   .get(&Statistic::CursedInscriptions.key())?
+    //   .map(|entry| entry.value())
+    //   .unwrap_or_default();
+    // writeln!(writer, "# cursed_inscriptions {}", cursed_inscriptions)?;
 
-    let blessed_inscriptions = statistic_to_count
-      .get(&Statistic::BlessedInscriptions.key())?
-      .map(|entry| entry.value())
-      .unwrap_or_default();
-    writeln!(writer, "# blessed_inscriptions {}", blessed_inscriptions)?;
+    // let blessed_inscriptions = statistic_to_count
+    //   .get(&Statistic::BlessedInscriptions.key())?
+    //   .map(|entry| entry.value())
+    //   .unwrap_or_default();
+    // writeln!(writer, "# blessed_inscriptions {}", blessed_inscriptions)?;
 
-    let unbound_inscriptions = statistic_to_count
-      .get(&Statistic::UnboundInscriptions.key())?
-      .map(|entry| entry.value())
-      .unwrap_or_default();
-    writeln!(writer, "# unbound_inscriptions {}", unbound_inscriptions)?;
+    // let unbound_inscriptions = statistic_to_count
+    //   .get(&Statistic::UnboundInscriptions.key())?
+    //   .map(|entry| entry.value())
+    //   .unwrap_or_default();
+    // writeln!(writer, "# unbound_inscriptions {}", unbound_inscriptions)?;
 
-    let bytes = bincode::serialize(&(
-      lost_sats,
-      cursed_inscriptions,
-      blessed_inscriptions,
-      unbound_inscriptions,
-    ))?;
-    let mut final_bytes = vec![211u8];
-    final_bytes.extend_from_slice(&bytes);
+    // let bytes = bincode::serialize(&(
+    //   lost_sats,
+    //   cursed_inscriptions,
+    //   blessed_inscriptions,
+    //   unbound_inscriptions,
+    // ))?;
+    // let mut final_bytes = vec![211u8];
+    // final_bytes.extend_from_slice(&bytes);
 
-    let compressed = lz4::block::compress(&final_bytes, None, true)?;
+    // let compressed = lz4::block::compress(&final_bytes, None, true)?;
 
-    runtime.block_on(async {
-      agent
-        .update(&runes_indexer, "load")
-        .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
-        .call_and_wait()
-        .await
-        .unwrap();
-    });
+    // runtime.block_on(async {
+    //   agent
+    //     .update(&runes_indexer, "load")
+    //     .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
+    //     .call_and_wait()
+    //     .await
+    //     .unwrap();
+    // });
 
-    // 201 u32 Vec<u32>
-    let sequence_number_to_children_data: Vec<(u32, Vec<u32>)> = sequence_number_to_children
+    // // 201 u32 Vec<u32>
+    // let sequence_number_to_children_data: Vec<(u32, Vec<u32>)> = sequence_number_to_children
+    //   .iter()?
+    //   .map(|x| x.unwrap())
+    //   .map(|x| {
+    //     (
+    //       x.0.value(),
+    //       x.1
+    //         .into_iter()
+    //         .map(|x| x.unwrap().value())
+    //         .collect::<Vec<_>>(),
+    //     )
+    //   })
+    //   .collect::<Vec<_>>();
+
+    // self.process_chunks(
+    //   sequence_number_to_children_data,
+    //   201,
+    //   "sequence_number_to_children",
+    //   &mut writer,
+    //   &runtime,
+    //   &agent,
+    //   &runes_indexer,
+    // )?;
+
+    // 204 u32 u32
+    let height_to_last_sequence_number_data: Vec<(u32, u32)> = height_to_last_sequence_number
       .iter()?
       .map(|x| x.unwrap())
-      .map(|x| {
-        (
-          x.0.value(),
-          x.1
-            .into_iter()
-            .map(|x| x.unwrap().value())
-            .collect::<Vec<_>>(),
-        )
-      })
+      .map(|x| (x.0.value(), x.1.value()))
       .collect::<Vec<_>>();
-
     self.process_chunks(
-      sequence_number_to_children_data,
-      201,
-      "sequence_number_to_children",
+      height_to_last_sequence_number_data,
+      204,
+      "height_to_last_sequence_number",
       &mut writer,
       &runtime,
       &agent,
       &runes_indexer,
     )?;
 
-    // // 204 u32 u32
-    // let height_to_last_sequence_number_data: Vec<(u32, u32)> = height_to_last_sequence_number
-    //   .iter()?
-    //   .map(|x| x.unwrap())
-    //   .map(|x| (x.0.value(), x.1.value()))
-    //   .collect::<Vec<_>>();
-    // self.process_chunks(
-    //   height_to_last_sequence_number_data,
-    //   204,
-    //   "height_to_last_sequence_number",
-    //   &mut writer,
-    //   &runtime,
-    //   &agent,
-    //   &runes_indexer,
-    // )?;
-
-    // // 208 u64 SatPoint
-    // let sat_to_satpoint_data: Vec<(u64, SatPoint)> = sat_to_satpoint
-    //   .iter()?
-    //   .map(|x| x.unwrap())
-    //   .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
-    //   .collect::<Vec<_>>();
-    // self.process_chunks(
-    //   sat_to_satpoint_data,
-    //   208,
-    //   "sat_to_satpoint",
-    //   &mut writer,
-    //   &runtime,
-    //   &agent,
-    //   &runes_indexer,
-    // )?;
+    // 208 u64 SatPoint
+    let sat_to_satpoint_data: Vec<(u64, SatPoint)> = sat_to_satpoint
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      sat_to_satpoint_data,
+      208,
+      "sat_to_satpoint",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
 
     // // 200 u64, Vec<u32>
     // let sat_to_sequence_number_data: Vec<(u64, Vec<u32>)> = sat_to_sequence_number
