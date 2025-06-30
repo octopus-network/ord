@@ -1230,7 +1230,10 @@ impl Index {
     agent: &Agent,
     runes_indexer: &Principal,
   ) -> Result<()> {
-    // let payload_size: usize = 1_700_000;
+    let mut payload_size: usize = 1_990_000;
+    if table_name == "sat_to_sequence_number" {
+      payload_size = 1_000_000;
+    }
     let mut cache = vec![];
     let chunks: Vec<_> = data.chunks(1000).collect();
     let total_chunks = chunks.len();
@@ -1262,7 +1265,7 @@ impl Index {
 
       // 检查压缩后的大小是否超过限制，但如果是最后一个chunk则跳过检查
       let is_last_chunk = i == total_chunks - 1;
-      if compressed.len() > 1_990_000 && !is_last_chunk {
+      if compressed.len() > payload_size && !is_last_chunk {
         writeln!(writer, "compressed len: {}", compressed.len())?;
         // 超过限制，回退这个 chunk
         let chunk_len = chunk.len();
@@ -1274,7 +1277,7 @@ impl Index {
           let mut final_bytes = vec![table_id];
           final_bytes.extend_from_slice(&bytes);
           let compressed = lz4::block::compress(&final_bytes, None, true)?;
-          if compressed.len() > 1_990_000 {
+          if compressed.len() > payload_size {
             writeln!(
               writer,
               "# sending1 {} chunk {} in batches, len: {}, compressed len: {}",
@@ -1285,7 +1288,7 @@ impl Index {
             )?;
             assert!(table_id == 202 || table_id == 207);
             // 将压缩数据按每1,990,000字节分块发送
-            let chunk_size = 1_990_000;
+            let chunk_size = payload_size;
             let mut offset = 0;
             let mut chunk_index = 0;
 
@@ -1298,9 +1301,7 @@ impl Index {
               writeln!(
                 writer,
                 "# sending {} chunk {} (split {})",
-                table_name,
-                i,
-                chunk_index,
+                table_name, i, chunk_index,
               )?;
 
               runtime.block_on(async {
@@ -1320,12 +1321,7 @@ impl Index {
             runtime.block_on(async {
               agent
                 .update(runes_indexer, "load")
-                .with_arg(
-                  Encode!(&LoadArgs {
-                    data: compressed
-                  })
-                  .unwrap(),
-                )
+                .with_arg(Encode!(&LoadArgs { data: compressed }).unwrap())
                 .call_and_wait()
                 .await
                 .unwrap();
