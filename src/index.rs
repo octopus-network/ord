@@ -1235,7 +1235,7 @@ impl Index {
       payload_size = 1_000_000;
     } else if table_name == "inscription_number_to_sequence_number" {
       payload_size = 100_000;
-    } else if table_name = "outpoint_to_utxo_entry" {
+    } else if table_name == "outpoint_to_utxo_entry" {
       payload_size = 1_000_000;
     }
     let mut cache = vec![];
