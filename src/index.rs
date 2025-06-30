@@ -1233,6 +1233,8 @@ impl Index {
     let mut payload_size: usize = 1_990_000;
     if table_name == "sat_to_sequence_number" {
       payload_size = 1_000_000;
+    } else if table_name == "inscription_number_to_sequence_number" {
+      payload_size = 800_000;
     }
     let mut cache = vec![];
     let chunks: Vec<_> = data.chunks(1000).collect();
