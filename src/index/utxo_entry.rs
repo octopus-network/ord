@@ -195,7 +195,7 @@ enum State {
 
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct UtxoEntryBuf {
-  vec: Vec<u8>,
+  pub vec: Vec<u8>,
   #[cfg(debug_assertions)]
   state: State,
 }

@@ -1120,10 +1120,10 @@ impl Index {
     )?;
 
     // 207 OutPoint UtxoEntryBuf
-    let outpoint_to_utxo_entry_data: Vec<(OutPoint, UtxoEntryBuf)> = outpoint_to_utxo_entry
+    let outpoint_to_utxo_entry_data: Vec<(OutPoint, Vec<u8>)> = outpoint_to_utxo_entry
       .iter()?
       .map(|x| x.unwrap())
-      .map(|x| (OutPoint::load(*x.0.value()), x.1.value().to_buf()))
+      .map(|x| (OutPoint::load(*x.0.value()), x.1.value().to_buf().vec))
       .collect::<Vec<_>>();
     self.process_chunks(
       outpoint_to_utxo_entry_data,
