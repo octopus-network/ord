@@ -1145,7 +1145,7 @@ impl Index {
               cache.len(),
               compressed.len()
             )?;
-            assert!(table_id == 202 || table_id == 207);
+            assert!(table_id == 201 || table_id == 202 || table_id == 207);
             // 将压缩数据按每1,990,000字节分块发送
             let chunk_size = payload_size;
             let mut offset = 0;
