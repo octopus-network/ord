@@ -1097,6 +1097,16 @@ impl Index {
     let chunks: Vec<_> = data.chunks(1000).collect();
     let total_chunks = chunks.len();
     let mut chunk_iter = chunks.into_iter().enumerate();
+    
+    // Skip 65000 chunks for inscription_number_to_sequence_number table
+    if table_name == "inscription_number_to_sequence_number" {
+      let skip_count = 65000;
+      for _ in 0..skip_count {
+        if chunk_iter.next().is_none() {
+          break;
+        }
+      }
+    }
 
     while let Some((i, chunk)) = chunk_iter.next() {
       // 预取：先添加这个 chunk 到 cache
