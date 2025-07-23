@@ -987,6 +987,47 @@ impl Index {
       &runes_indexer,
     )?;
 
+    // 208 u64 SatPoint
+    let sat_to_satpoint_data: Vec<(u64, SatPoint)> = sat_to_satpoint
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| (x.0.value(), SatPoint::load(*x.1.value())))
+      .collect::<Vec<_>>();
+    self.process_chunks(
+      sat_to_satpoint_data,
+      208,
+      "sat_to_satpoint",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
+    // 200 u64 Vec<u32>
+    let sat_to_sequence_number_data: Vec<(u64, Vec<u32>)> = sat_to_sequence_number
+      .iter()?
+      .map(|x| x.unwrap())
+      .map(|x| {
+        (
+          x.0.value(),
+          x.1
+            .into_iter()
+            .map(|x| x.unwrap().value())
+            .collect::<Vec<_>>(),
+        )
+      })
+      .collect::<Vec<_>>();
+
+    self.process_chunks(
+      sat_to_sequence_number_data,
+      200,
+      "sat_to_sequence_number",
+      &mut writer,
+      &runtime,
+      &agent,
+      &runes_indexer,
+    )?;
+
     // 205 InscriptionId u32
     let inscription_id_to_sequence_number_data: Vec<(InscriptionId, u32)> =
       inscription_id_to_sequence_number
@@ -1097,16 +1138,16 @@ impl Index {
     let chunks: Vec<_> = data.chunks(1000).collect();
     let total_chunks = chunks.len();
     let mut chunk_iter = chunks.into_iter().enumerate();
-    
-    // Skip 65000 chunks for inscription_number_to_sequence_number table
-    if table_name == "inscription_number_to_sequence_number" {
-      let skip_count = 65000;
-      for _ in 0..skip_count {
-        if chunk_iter.next().is_none() {
-          break;
-        }
-      }
-    }
+
+    // // Skip 65000 chunks for inscription_number_to_sequence_number table
+    // if table_name == "inscription_number_to_sequence_number" {
+    //   let skip_count = 65000;
+    //   for _ in 0..skip_count {
+    //     if chunk_iter.next().is_none() {
+    //       break;
+    //     }
+    //   }
+    // }
 
     while let Some((i, chunk)) = chunk_iter.next() {
       // 预取：先添加这个 chunk 到 cache
