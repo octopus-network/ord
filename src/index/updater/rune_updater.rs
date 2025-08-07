@@ -260,7 +260,7 @@ impl RuneUpdater<'_, '_, '_, '_> {
             .get_mut(vout)
             .expect("op_return must exist; QED")
             .runes
-            .push((*id, balance.n().to_string()));
+            .push((*id, balance.n()));
         }
         continue;
       }
@@ -304,7 +304,7 @@ impl RuneUpdater<'_, '_, '_, '_> {
           .get_mut(vout)
           .expect("output must exist; QED")
           .runes
-          .push((id, balance.n().to_string()));
+          .push((id, balance.n()));
       }
 
       self
@@ -639,7 +639,7 @@ impl RuneUpdater<'_, '_, '_, '_> {
             .get_mut(index)
             .expect("input must exist; QED")
             .runes
-            .push((id, balance.to_string()));
+            .push((id, balance));
         }
       }
     }
