@@ -21,6 +21,9 @@ pub struct RsTxIn {
   pub previous_output: OutPoint,
   pub value: Amount,
   pub address: Address,
+  #[serde(
+    with = "serde_with::As::<Vec<(serde_with::DisplayFromStr, serde_with::DisplayFromStr)>>"
+  )]
   pub runes: Vec<(RuneId, u128)>,
 }
 
@@ -29,6 +32,9 @@ pub struct RsTxOut {
   pub value: Amount,
   pub address: Option<Address>,
   pub op_return: Option<Artifact>,
+  #[serde(
+    with = "serde_with::As::<Vec<(serde_with::DisplayFromStr, serde_with::DisplayFromStr)>>"
+  )]
   pub runes: Vec<(RuneId, u128)>,
 }
 
@@ -78,11 +84,11 @@ impl PgDatabase {
     query_builder.push_values(runes, |mut b, (rune_id, rune_entry)| {
       b.push_bind(BigDecimal::from(rune_entry.number))
         .push_bind(rune_id.to_string())
-        .push_bind(BigDecimal::from(rune_entry.burned))
+        .push_bind(rune_entry.burned.to_string())
         .push_bind(rune_entry.divisibility as i16)
         .push_bind(rune_entry.etching.to_string())
-        .push_bind(BigDecimal::from(rune_entry.mints))
-        .push_bind(BigDecimal::from(rune_entry.premine))
+        .push_bind(rune_entry.mints.to_string())
+        .push_bind(rune_entry.premine.to_string())
         .push_bind(rune_entry.spaced_rune.to_string())
         .push_bind(rune_entry.symbol.map(|s| {
           if s == '\0' {
@@ -96,36 +102,36 @@ impl PgDatabase {
             Some(s.to_string())
           }
         }))
-        .push_bind(rune_entry.terms.and_then(|t| t.cap).map(BigDecimal::from))
+        .push_bind(rune_entry.terms.and_then(|t| t.cap).map(|c| c.to_string()))
         .push_bind(
           rune_entry
             .terms
             .and_then(|t| t.height.0)
-            .map(BigDecimal::from),
+            .map(|h| h.to_string()),
         )
         .push_bind(
           rune_entry
             .terms
             .and_then(|t| t.height.1)
-            .map(BigDecimal::from),
+            .map(|h| h.to_string()),
         )
         .push_bind(
           rune_entry
             .terms
             .and_then(|t| t.amount)
-            .map(BigDecimal::from),
+            .map(|a| a.to_string()),
         )
         .push_bind(
           rune_entry
             .terms
             .and_then(|t| t.offset.0)
-            .map(BigDecimal::from),
+            .map(|o| o.to_string()),
         )
         .push_bind(
           rune_entry
             .terms
             .and_then(|t| t.offset.1)
-            .map(BigDecimal::from),
+            .map(|o| o.to_string()),
         )
         .push_bind(OffsetDateTime::from_unix_timestamp(rune_entry.timestamp as i64).unwrap())
         .push_bind(rune_entry.turbo)
@@ -562,7 +568,7 @@ impl PgDatabase {
     query_builder.push_values(addresses, |mut b, (address, rune_id, balance)| {
       b.push_bind(address.to_string())
         .push_bind(rune_id.to_string())
-        .push_bind(BigDecimal::from(balance));
+        .push_bind(balance.to_string());
     });
 
     // Add ON CONFLICT clause for upsert

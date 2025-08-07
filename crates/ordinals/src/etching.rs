@@ -3,6 +3,7 @@ use super::*;
 #[derive(Default, Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Eq)]
 pub struct Etching {
   pub divisibility: Option<u8>,
+  #[serde(with = "serde_with::As::<Option<serde_with::DisplayFromStr>>")]
   pub premine: Option<u128>,
   pub rune: Option<Rune>,
   pub spacers: Option<u32>,

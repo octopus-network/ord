@@ -3,6 +3,7 @@ use super::*;
 #[derive(Default, Serialize, Deserialize, Debug, PartialEq, Copy, Clone, Eq)]
 pub struct Edict {
   pub id: RuneId,
+  #[serde(with = "serde_with::As::<serde_with::DisplayFromStr>")]
   pub amount: u128,
   pub output: u32,
 }
