@@ -4,11 +4,42 @@ use bitcoin::{address::Address, Amount, OutPoint};
 use sqlx::{
   postgres::{PgPool, PgPoolOptions},
   types::{time::OffsetDateTime, BigDecimal},
-  Execute, QueryBuilder, Row,
+  QueryBuilder, Row,
 };
 use std::collections::HashMap;
 use std::env;
+use std::time::Duration;
 use tokio::runtime::Runtime;
+
+/// Macro to execute a query with exponential backoff retry (1s, 2s, 4s, 8s cap).
+/// The block must build a QueryBuilder and end with `qb` as the last expression.
+/// Usage: execute_with_retry!(self, "operation name", pool, { /* build qb */ qb })
+macro_rules! execute_with_retry {
+  ($self:expr, $operation:expr, $pool:expr, $build_qb:block) => {{
+    $self.runtime.block_on(async {
+      let mut delay_secs = 1u64;
+      loop {
+        let mut qb = $build_qb;
+        match qb.build().execute($pool).await {
+          Ok(result) => {
+            log::debug!("{}: {} rows affected", $operation, result.rows_affected());
+            return Ok(());
+          }
+          Err(error) => {
+            log::warn!(
+              "{} failed, retrying in {}s. Error: {}",
+              $operation,
+              delay_secs,
+              error
+            );
+            tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+            delay_secs = (delay_secs * 2).min(8);
+          }
+        }
+      }
+    })
+  }};
+}
 
 #[derive(Default, Serialize, Debug, Clone)]
 pub struct RsTransaction {
@@ -71,109 +102,94 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.runes (
-        number, rune_id, burned, divisibility, etching,
-        mints, premine, spaced_rune, symbol,
-        terms_cap, terms_height_start, terms_height_end,
-        terms_amount, terms_offset_start, terms_offset_end,
-        timestamp, turbo, block, reorg
-      ) ",
-    );
-
-    query_builder.push_values(runes, |mut b, (rune_id, rune_entry)| {
-      b.push_bind(BigDecimal::from(rune_entry.number))
-        .push_bind(rune_id.to_string())
-        .push_bind(rune_entry.burned.to_string())
-        .push_bind(rune_entry.divisibility as i16)
-        .push_bind(rune_entry.etching.to_string())
-        .push_bind(rune_entry.mints.to_string())
-        .push_bind(rune_entry.premine.to_string())
-        .push_bind(rune_entry.spaced_rune.to_string())
-        .push_bind(rune_entry.symbol.map(|s| {
+    // Preprocess data for retry
+    let runes_data: Vec<_> = runes
+      .into_iter()
+      .map(|(rune_id, rune_entry)| {
+        let symbol = rune_entry.symbol.and_then(|s| {
           if s == '\0' {
-            log::warn!(
-              "Found null byte as symbol - Rune ID: {}.",
-              rune_id.to_string()
-            );
-
+            log::warn!("Found null byte as symbol - Rune ID: {}.", rune_id);
             None
           } else {
             Some(s.to_string())
           }
-        }))
-        .push_bind(rune_entry.terms.and_then(|t| t.cap).map(|c| c.to_string()))
-        .push_bind(
-          rune_entry
-            .terms
-            .and_then(|t| t.height.0)
-            .map(|h| h.to_string()),
+        });
+        (
+          BigDecimal::from(rune_entry.number),
+          rune_id.to_string(),
+          rune_entry.burned.to_string(),
+          rune_entry.divisibility as i16,
+          rune_entry.etching.to_string(),
+          rune_entry.mints.to_string(),
+          rune_entry.premine.to_string(),
+          rune_entry.spaced_rune.to_string(),
+          symbol,
+          rune_entry.terms.and_then(|t| t.cap).map(|c| c.to_string()),
+          rune_entry.terms.and_then(|t| t.height.0).map(|h| h.to_string()),
+          rune_entry.terms.and_then(|t| t.height.1).map(|h| h.to_string()),
+          rune_entry.terms.and_then(|t| t.amount).map(|a| a.to_string()),
+          rune_entry.terms.and_then(|t| t.offset.0).map(|o| o.to_string()),
+          rune_entry.terms.and_then(|t| t.offset.1).map(|o| o.to_string()),
+          OffsetDateTime::from_unix_timestamp(rune_entry.timestamp as i64).unwrap(),
+          rune_entry.turbo,
+          BigDecimal::from(rune_entry.block),
         )
-        .push_bind(
-          rune_entry
-            .terms
-            .and_then(|t| t.height.1)
-            .map(|h| h.to_string()),
-        )
-        .push_bind(
-          rune_entry
-            .terms
-            .and_then(|t| t.amount)
-            .map(|a| a.to_string()),
-        )
-        .push_bind(
-          rune_entry
-            .terms
-            .and_then(|t| t.offset.0)
-            .map(|o| o.to_string()),
-        )
-        .push_bind(
-          rune_entry
-            .terms
-            .and_then(|t| t.offset.1)
-            .map(|o| o.to_string()),
-        )
-        .push_bind(OffsetDateTime::from_unix_timestamp(rune_entry.timestamp as i64).unwrap())
-        .push_bind(rune_entry.turbo)
-        .push_bind(BigDecimal::from(rune_entry.block))
-        .push_bind(false);
-    });
+      })
+      .collect();
 
-    query_builder.push(
-      " ON CONFLICT (rune_id) WHERE NOT reorg DO UPDATE SET
-        number = EXCLUDED.number,
-        burned = EXCLUDED.burned,
-        divisibility = EXCLUDED.divisibility,
-        etching = EXCLUDED.etching,
-        mints = EXCLUDED.mints,
-        premine = EXCLUDED.premine,
-        spaced_rune = EXCLUDED.spaced_rune,
-        symbol = EXCLUDED.symbol,
-        terms_cap = EXCLUDED.terms_cap,
-        terms_height_start = EXCLUDED.terms_height_start,
-        terms_height_end = EXCLUDED.terms_height_end,
-        terms_amount = EXCLUDED.terms_amount,
-        terms_offset_start = EXCLUDED.terms_offset_start,
-        terms_offset_end = EXCLUDED.terms_offset_end,
-        timestamp = EXCLUDED.timestamp,
-        turbo = EXCLUDED.turbo,
-        block = EXCLUDED.block,
-        reorg = EXCLUDED.reorg",
-    );
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!("Successfully inserted {} runes", result.rows_affected());
-          Ok(())
-        }
-        Err(error) => {
-          panic!("Failed to insert runes. SQL: {}\nError: {}", sql, error);
-        }
-      }
+    execute_with_retry!(self, "insert runes", &self.pg_pool, {
+      let mut qb = QueryBuilder::new(
+        "INSERT INTO public.runes (
+          number, rune_id, burned, divisibility, etching,
+          mints, premine, spaced_rune, symbol,
+          terms_cap, terms_height_start, terms_height_end,
+          terms_amount, terms_offset_start, terms_offset_end,
+          timestamp, turbo, block, reorg
+        ) ",
+      );
+      qb.push_values(&runes_data, |mut b, data| {
+        b.push_bind(&data.0)
+          .push_bind(&data.1)
+          .push_bind(&data.2)
+          .push_bind(data.3)
+          .push_bind(&data.4)
+          .push_bind(&data.5)
+          .push_bind(&data.6)
+          .push_bind(&data.7)
+          .push_bind(&data.8)
+          .push_bind(&data.9)
+          .push_bind(&data.10)
+          .push_bind(&data.11)
+          .push_bind(&data.12)
+          .push_bind(&data.13)
+          .push_bind(&data.14)
+          .push_bind(data.15)
+          .push_bind(data.16)
+          .push_bind(&data.17)
+          .push_bind(false);
+      });
+      qb.push(
+        " ON CONFLICT (rune_id) WHERE NOT reorg DO UPDATE SET
+          number = EXCLUDED.number,
+          burned = EXCLUDED.burned,
+          divisibility = EXCLUDED.divisibility,
+          etching = EXCLUDED.etching,
+          mints = EXCLUDED.mints,
+          premine = EXCLUDED.premine,
+          spaced_rune = EXCLUDED.spaced_rune,
+          symbol = EXCLUDED.symbol,
+          terms_cap = EXCLUDED.terms_cap,
+          terms_height_start = EXCLUDED.terms_height_start,
+          terms_height_end = EXCLUDED.terms_height_end,
+          terms_amount = EXCLUDED.terms_amount,
+          terms_offset_start = EXCLUDED.terms_offset_start,
+          terms_offset_end = EXCLUDED.terms_offset_end,
+          timestamp = EXCLUDED.timestamp,
+          turbo = EXCLUDED.turbo,
+          block = EXCLUDED.block,
+          reorg = EXCLUDED.reorg",
+      );
+      qb
     })
   }
 
@@ -182,7 +198,8 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let processed_rs_txs = rs_txs
+    // Preprocess data for retry
+    let tx_data: Vec<_> = rs_txs
       .into_iter()
       .map(|(txid, mut transaction)| {
         for output in &mut transaction.outputs {
@@ -198,53 +215,28 @@ impl PgDatabase {
             }
           }
         }
-
-        (txid, transaction)
+        (
+          txid.to_string(),
+          serde_json::to_value(&transaction).unwrap(),
+          BigDecimal::from(block),
+        )
       })
-      .collect::<HashMap<_, _>>();
+      .collect();
 
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.transactions (
-            txid,
-            transaction,
-            block,
-            reorg
-        ) ",
-    );
-
-    query_builder.push_values(processed_rs_txs, |mut b, (txid, transaction)| {
-      b.push_bind(txid.to_string())
-        .push_bind(serde_json::to_value(transaction).unwrap())
-        .push_bind(BigDecimal::from(block))
-        .push_bind(false);
-    });
-
-    query_builder.push(
-      " ON CONFLICT (txid) WHERE NOT reorg DO UPDATE SET
-            transaction = EXCLUDED.transaction,
-            block = EXCLUDED.block,
-            reorg = EXCLUDED.reorg",
-    );
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully inserted {} transactions",
-            result.rows_affected()
-          );
-          Ok(())
-        }
-        Err(error) => {
-          panic!(
-            "Failed to insert transactions at block {}. SQL: {}\nError: {}",
-            block, sql, error
-          );
-        }
-      }
+    execute_with_retry!(self, "insert transactions", &self.pg_pool, {
+      let mut qb = QueryBuilder::new(
+        "INSERT INTO public.transactions (txid, transaction, block, reorg) ",
+      );
+      qb.push_values(&tx_data, |mut b, (txid, tx_json, blk)| {
+        b.push_bind(txid).push_bind(tx_json).push_bind(blk).push_bind(false);
+      });
+      qb.push(
+        " ON CONFLICT (txid) WHERE NOT reorg DO UPDATE SET
+              transaction = EXCLUDED.transaction,
+              block = EXCLUDED.block,
+              reorg = EXCLUDED.reorg",
+      );
+      qb
     })
   }
 
@@ -258,63 +250,38 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.rune_transactions (
-            rune_id,
-            txid,
-            burn,
-            etch,
-            mint,
-            transfer,
-            block,
-            timestamp,
-            reorg
-        ) ",
-    );
+    let ts = OffsetDateTime::from_unix_timestamp(timestamp as i64).unwrap();
+    let blk = BigDecimal::from(block);
+    let tx_data: Vec<_> = rune_transactions
+      .into_iter()
+      .map(|((txid, rune_id), tags)| {
+        (rune_id.to_string(), txid.to_string(), tags.burn, tags.etch, tags.mint, tags.transfer)
+      })
+      .collect();
 
-    query_builder.push_values(rune_transactions, |mut b, ((txid, rune_id), tags)| {
-      b.push_bind(rune_id.to_string())
-        .push_bind(txid.to_string())
-        .push_bind(tags.burn)
-        .push_bind(tags.etch)
-        .push_bind(tags.mint)
-        .push_bind(tags.transfer)
-        .push_bind(BigDecimal::from(block))
-        .push_bind(OffsetDateTime::from_unix_timestamp(timestamp as i64).unwrap())
-        .push_bind(false);
-    });
-
-    query_builder.push(
-      " ON CONFLICT (rune_id, txid) WHERE NOT reorg DO UPDATE SET
-            burn = EXCLUDED.burn,
-            etch = EXCLUDED.etch,
-            mint = EXCLUDED.mint,
-            transfer = EXCLUDED.transfer,
-            block = EXCLUDED.block,
-            timestamp = EXCLUDED.timestamp,
-            reorg = EXCLUDED.reorg",
-    );
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully inserted {} rune transactions at block {}",
-            result.rows_affected(),
-            block
-          );
-          Ok(())
-        }
-        Err(error) => {
-          panic!(
-            "Failed to insert rune transactions at block {}. SQL: {}\nError: {}",
-            block, sql, error
-          );
-        }
-      }
+    execute_with_retry!(self, "insert rune transactions", &self.pg_pool, {
+      let mut qb = QueryBuilder::new(
+        "INSERT INTO public.rune_transactions (
+              rune_id, txid, burn, etch, mint, transfer, block, timestamp, reorg) ",
+      );
+      qb.push_values(&tx_data, |mut b, (rune_id, txid, burn, etch, mint, transfer)| {
+        b.push_bind(rune_id)
+          .push_bind(txid)
+          .push_bind(burn)
+          .push_bind(etch)
+          .push_bind(mint)
+          .push_bind(transfer)
+          .push_bind(&blk)
+          .push_bind(ts)
+          .push_bind(false);
+      });
+      qb.push(
+        " ON CONFLICT (rune_id, txid) WHERE NOT reorg DO UPDATE SET
+              burn = EXCLUDED.burn, etch = EXCLUDED.etch, mint = EXCLUDED.mint,
+              transfer = EXCLUDED.transfer, block = EXCLUDED.block,
+              timestamp = EXCLUDED.timestamp, reorg = EXCLUDED.reorg",
+      );
+      qb
     })
   }
 
@@ -348,48 +315,24 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.address_transactions (
-            address,
-            txid,
-            block,
-            reorg
-        ) ",
-    );
+    let blk = BigDecimal::from(block);
+    let addr_data: Vec<_> = address_transactions
+      .into_iter()
+      .map(|(txid, address)| (address.to_string(), txid.to_string()))
+      .collect();
 
-    query_builder.push_values(address_transactions, |mut b, (txid, address)| {
-      b.push_bind(address.to_string())
-        .push_bind(txid.to_string())
-        .push_bind(BigDecimal::from(block))
-        .push_bind(false);
-    });
-
-    query_builder.push(
-      " ON CONFLICT (address, txid) WHERE NOT reorg DO UPDATE SET
-            block = EXCLUDED.block,
-            reorg = EXCLUDED.reorg",
-    );
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully inserted {} address transactions at block {}",
-            result.rows_affected(),
-            block
-          );
-          Ok(())
-        }
-        Err(error) => {
-          panic!(
-            "Failed to insert address transactions at block {}. SQL: {}\nError: {}",
-            block, sql, error
-          );
-        }
-      }
+    execute_with_retry!(self, "insert address transactions", &self.pg_pool, {
+      let mut qb = QueryBuilder::new(
+        "INSERT INTO public.address_transactions (address, txid, block, reorg) ",
+      );
+      qb.push_values(&addr_data, |mut b, (addr, txid)| {
+        b.push_bind(addr).push_bind(txid).push_bind(&blk).push_bind(false);
+      });
+      qb.push(
+        " ON CONFLICT (address, txid) WHERE NOT reorg DO UPDATE SET
+              block = EXCLUDED.block, reorg = EXCLUDED.reorg",
+      );
+      qb
     })
   }
 
@@ -422,38 +365,43 @@ impl PgDatabase {
       "updated_runes",
       "updated_addresses",
     ];
+    let blk = BigDecimal::from(block);
+
     for table in tables.iter() {
       loop {
         let affected = self.runtime.block_on(async {
-          let result = sqlx::query(&format!(
-            "WITH to_update AS (
-              SELECT id FROM public.{} 
-              WHERE block >= $1 AND reorg = FALSE 
-              ORDER BY id LIMIT 1000
-            )
-            UPDATE public.{} SET reorg = TRUE 
-            WHERE id IN (SELECT id FROM to_update)",
-            table, table
-          ))
-          .bind(BigDecimal::from(block))
-          .execute(&self.pg_pool)
-          .await;
-
-          match result {
-            Ok(result) => {
-              log::debug!(
-                "Marked {} rows as reorg in public.{} at height {}",
-                result.rows_affected(),
-                table,
-                block
-              );
-              result.rows_affected()
-            }
-            Err(error) => {
-              panic!(
-                "Failed to roll back public.{} to height {}. Error: {}",
-                table, block, error
-              );
+          let mut delay_secs = 1u64;
+          loop {
+            let sql = format!(
+              "WITH to_update AS (
+                SELECT id FROM public.{}
+                WHERE block >= $1 AND reorg = FALSE
+                ORDER BY id LIMIT 1000
+              )
+              UPDATE public.{} SET reorg = TRUE
+              WHERE id IN (SELECT id FROM to_update)",
+              table, table
+            );
+            match sqlx::query(&sql).bind(&blk).execute(&self.pg_pool).await {
+              Ok(result) => {
+                log::debug!(
+                  "Marked {} rows as reorg in public.{} at height {}",
+                  result.rows_affected(),
+                  table,
+                  block
+                );
+                return result.rows_affected();
+              }
+              Err(error) => {
+                log::warn!(
+                  "mark reorg {} failed, retrying in {}s. Error: {}",
+                  table,
+                  delay_secs,
+                  error
+                );
+                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                delay_secs = (delay_secs * 2).min(8);
+              }
             }
           }
         });
@@ -495,44 +443,22 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-      "UPDATE public.runes AS t SET
-            burned = c.burned::numeric,
-            mints = c.mints::numeric
-         FROM (",
-    );
+    let runes_data: Vec<_> = runes
+      .iter()
+      .map(|(rune_id, burned, mints)| {
+        (rune_id.to_string(), BigDecimal::from(*burned), BigDecimal::from(*mints))
+      })
+      .collect();
 
-    query_builder.push_values(runes, |mut b, (rune_id, burned, mints)| {
-      b.push_bind(rune_id.to_string())
-        .push_bind(BigDecimal::from(burned))
-        .push_bind(BigDecimal::from(mints));
-    });
-
-    query_builder.push(
-      ") AS c(rune_id, burned, mints)
-         WHERE c.rune_id = t.rune_id
-         AND t.reorg = false",
-    );
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully updated burned and mints for {} runes",
-            result.rows_affected()
-          );
-          Ok(())
-        }
-        Err(error) => {
-          panic!(
-            "Failed to update runes burned and mints. SQL: {}\nError: {}",
-            sql, error
-          );
-        }
-      }
+    execute_with_retry!(self, "update runes", &self.pg_pool, {
+      let mut qb = QueryBuilder::new(
+        "UPDATE public.runes AS t SET burned = c.burned::numeric, mints = c.mints::numeric FROM (",
+      );
+      qb.push_values(&runes_data, |mut b, (rune_id, burned, mints)| {
+        b.push_bind(rune_id).push_bind(burned).push_bind(mints);
+      });
+      qb.push(") AS c(rune_id, burned, mints) WHERE c.rune_id = t.rune_id AND t.reorg = false");
+      qb
     })
   }
 
@@ -557,45 +483,20 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.address_rune_balance (
-            address,
-            rune_id,
-            balance
-        ) ",
-    );
+    let addr_data: Vec<_> = addresses
+      .into_iter()
+      .map(|(addr, rune_id, balance)| (addr.to_string(), rune_id.to_string(), balance.to_string()))
+      .collect();
 
-    query_builder.push_values(addresses, |mut b, (address, rune_id, balance)| {
-      b.push_bind(address.to_string())
-        .push_bind(rune_id.to_string())
-        .push_bind(balance.to_string());
-    });
-
-    // Add ON CONFLICT clause for upsert
-    query_builder.push(
-      " ON CONFLICT (address, rune_id) DO UPDATE SET
-            balance = EXCLUDED.balance",
-    );
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully upserted {} address rune balances",
-            result.rows_affected()
-          );
-          Ok(())
-        }
-        Err(error) => {
-          panic!(
-            "Failed to upsert address rune balances. SQL: {}\nError: {}",
-            sql, error
-          );
-        }
-      }
+    execute_with_retry!(self, "upsert address rune balances", &self.pg_pool, {
+      let mut qb = QueryBuilder::new(
+        "INSERT INTO public.address_rune_balance (address, rune_id, balance) ",
+      );
+      qb.push_values(&addr_data, |mut b, (addr, rune_id, balance)| {
+        b.push_bind(addr).push_bind(rune_id).push_bind(balance);
+      });
+      qb.push(" ON CONFLICT (address, rune_id) DO UPDATE SET balance = EXCLUDED.balance");
+      qb
     })
   }
 
@@ -619,21 +520,23 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let query = sqlx::query("DELETE FROM public.address_rune_balance WHERE address = ANY($1)")
-      .bind(addresses);
-
     self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully deleted {} address rune balance records",
-            result.rows_affected()
-          );
-          Ok(())
-        }
-        Err(error) => {
-          log::error!("Failed to delete address rune balances. Error: {}", error);
-          Err(error.into())
+      let mut delay_secs = 1u64;
+      loop {
+        match sqlx::query("DELETE FROM public.address_rune_balance WHERE address = ANY($1)")
+          .bind(&addresses)
+          .execute(&self.pg_pool)
+          .await
+        {
+          Ok(result) => {
+            log::debug!("clear rune balance addresses: {} rows affected", result.rows_affected());
+            return Ok(());
+          }
+          Err(error) => {
+            log::warn!("clear rune balance addresses failed, retrying in {}s. Error: {}", delay_secs, error);
+            tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+            delay_secs = (delay_secs * 2).min(8);
+          }
         }
       }
     })
@@ -659,40 +562,15 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.updated_runes (
-            rune_id,
-            block,
-            reorg
-        ) ",
-    );
+    let blk = BigDecimal::from(block);
+    let rune_ids: Vec<_> = updated_runes.into_iter().map(|r| r.to_string()).collect();
 
-    query_builder.push_values(updated_runes, |mut b, rune_id| {
-      b.push_bind(rune_id.to_string())
-        .push_bind(BigDecimal::from(block))
-        .push_bind(false);
-    });
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully inserted {} updated runes at block {}",
-            result.rows_affected(),
-            block
-          );
-          Ok(())
-        }
-        Err(error) => {
-          panic!(
-            "Failed to insert updated runes at block {}. SQL: {}\nError: {}",
-            block, sql, error
-          );
-        }
-      }
+    execute_with_retry!(self, "insert updated runes", &self.pg_pool, {
+      let mut qb = QueryBuilder::new("INSERT INTO public.updated_runes (rune_id, block, reorg) ");
+      qb.push_values(&rune_ids, |mut b, rune_id| {
+        b.push_bind(rune_id).push_bind(&blk).push_bind(false);
+      });
+      qb
     })
   }
 
@@ -721,40 +599,15 @@ impl PgDatabase {
       return Ok(());
     }
 
-    let mut query_builder = QueryBuilder::new(
-      "INSERT INTO public.updated_addresses (
-            address,
-            block,
-            reorg
-        ) ",
-    );
+    let blk = BigDecimal::from(block);
+    let addrs: Vec<_> = updated_addresses.into_iter().map(|a| a.to_string()).collect();
 
-    query_builder.push_values(updated_addresses, |mut b, address| {
-      b.push_bind(address.to_string())
-        .push_bind(BigDecimal::from(block))
-        .push_bind(false);
-    });
-
-    let query = query_builder.build();
-    let sql = query.sql().to_string();
-
-    self.runtime.block_on(async {
-      match query.execute(&self.pg_pool).await {
-        Ok(result) => {
-          log::debug!(
-            "Successfully inserted {} updated addresses at block {}",
-            result.rows_affected(),
-            block
-          );
-          Ok(())
-        }
-        Err(error) => {
-          panic!(
-            "Failed to insert updated addresses at block {}. SQL: {}\nError: {}",
-            block, sql, error
-          );
-        }
-      }
+    execute_with_retry!(self, "insert updated addresses", &self.pg_pool, {
+      let mut qb = QueryBuilder::new("INSERT INTO public.updated_addresses (address, block, reorg) ");
+      qb.push_values(&addrs, |mut b, addr| {
+        b.push_bind(addr).push_bind(&blk).push_bind(false);
+      });
+      qb
     })
   }
 
