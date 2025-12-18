@@ -248,6 +248,8 @@ impl Server {
         )
         .route("/preview/{inscription_id}", get(Self::preview))
         .route("/rare.txt", get(Self::rare_txt))
+        .route("/resolve_address/{address}", get(Self::resolve_address))
+        .route("/resolve_rune/{rune}", get(Self::resolve_rune))
         .route("/rune/{rune}", get(Self::rune))
         .route("/runes", get(Self::runes))
         .route("/runes/{page}", get(Self::runes_paginated))
@@ -990,6 +992,85 @@ impl Server {
         .page(server_config)
         .into_response()
       })
+    })
+  }
+
+  async fn resolve_rune(
+    Extension(index): Extension<Arc<Index>>,
+    Path(DeserializeFromStr(rune_query)): Path<DeserializeFromStr<query::Rune>>,
+  ) -> ServerResult<Json<api::ResolveRune>> {
+    task::block_in_place(|| {
+      if !index.has_rune_index() {
+        return Err(ServerError::NotFound(
+          "this server has no rune index".to_string(),
+        ));
+      }
+
+      let rune = match rune_query {
+        query::Rune::Spaced(spaced_rune) => spaced_rune.rune,
+        query::Rune::Id(rune_id) => index
+          .get_rune_by_id(rune_id)?
+          .ok_or_not_found(|| format!("rune {rune_id}"))?,
+        query::Rune::Number(number) => index
+          .get_rune_by_number(usize::try_from(number).unwrap())?
+          .ok_or_not_found(|| format!("rune number {number}"))?,
+      };
+
+      let Some((_id, _entry, parent)) = index.rune(rune)? else {
+        return Ok(Json(api::ResolveRune { result: None }));
+      };
+
+      let Some(parent_id) = parent else {
+        return Ok(Json(api::ResolveRune { result: None }));
+      };
+
+      let inscription_query = query::Inscription::Id(parent_id);
+      let Some((info, _, _)) = index.inscription_info(inscription_query, None)? else {
+        return Ok(Json(api::ResolveRune { result: None }));
+      };
+
+      let result = info.address.map(|address| api::RuneResolution {
+        address,
+        inscription_id: parent_id.to_string(),
+      });
+
+      Ok(Json(api::ResolveRune { result }))
+    })
+  }
+
+  async fn resolve_address(
+    Extension(server_config): Extension<Arc<ServerConfig>>,
+    Extension(index): Extension<Arc<Index>>,
+    Path(address): Path<Address<NetworkUnchecked>>,
+  ) -> ServerResult<Json<api::ResolveAddress>> {
+    task::block_in_place(|| {
+      if !index.has_address_index() {
+        return Err(ServerError::NotFound(
+          "this server has no address index".to_string(),
+        ));
+      }
+
+      let address = address
+        .require_network(server_config.chain.network())
+        .map_err(|err| ServerError::BadRequest(err.to_string()))?;
+
+      let outputs = index.get_address_info(&address)?;
+      let inscriptions = index.get_inscriptions_for_outputs(&outputs)?;
+
+      let mut rune_names = Vec::new();
+
+      if let Some(inscription_ids) = inscriptions {
+        for inscription_id in inscription_ids {
+          let inscription_query = query::Inscription::Id(inscription_id);
+          if let Some((info, _, _)) = index.inscription_info(inscription_query, None)? {
+            if let Some(rune) = info.rune {
+              rune_names.push(rune.to_string());
+            }
+          }
+        }
+      }
+
+      Ok(Json(api::ResolveAddress { rune_names }))
     })
   }
 

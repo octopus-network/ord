@@ -257,3 +257,19 @@ pub struct AddressInfo {
 pub struct Offers {
   pub offers: Vec<String>,
 }
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct RuneResolution {
+  pub address: String,
+  pub inscription_id: String,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResolveRune {
+  pub result: Option<RuneResolution>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResolveAddress {
+  pub rune_names: Vec<String>,
+}
