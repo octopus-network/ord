@@ -1016,7 +1016,7 @@ impl Server {
           .ok_or_not_found(|| format!("rune number {number}"))?,
       };
 
-      let Some((_id, _entry, parent)) = index.rune(rune)? else {
+      let Some((rune_id, entry, parent)) = index.rune(rune)? else {
         return Ok(Json(api::ResolveRune { result: None }));
       };
 
@@ -1029,9 +1029,40 @@ impl Server {
         return Ok(Json(api::ResolveRune { result: None }));
       };
 
+      // Get the transfer height from the current satpoint
+      let transfer_txid = info.satpoint.outpoint.txid;
+
+      // Check for special cases (unbound or null outpoint)
+      if info.satpoint.outpoint == unbound_outpoint() || info.satpoint.outpoint == OutPoint::null() {
+        return Err(ServerError::BadRequest(
+          "inscription is unbound or burned".to_string(),
+        ));
+      }
+
+      // Get transaction info
+      let tx_info = index
+        .get_transaction_info(&transfer_txid)?
+        .ok_or_not_found(|| format!("transaction {transfer_txid}"))?;
+
+      // Get blockhash (error if unconfirmed)
+      let blockhash = tx_info.blockhash.ok_or_else(|| {
+        ServerError::BadRequest("inscription transfer is unconfirmed".to_string())
+      })?;
+
+      // Get block height
+      let block_info = index
+        .block_header_info(blockhash)?
+        .ok_or_not_found(|| format!("block {blockhash}"))?;
+
+      let transfer_height = block_info.height as u32;
+
       let result = info.address.map(|address| api::RuneResolution {
         address,
         inscription_id: parent_id.to_string(),
+        rune_id: rune_id.to_string(),
+        etching: entry.etching.to_string(),
+        inscription_number: info.number,
+        transfer_height,
       });
 
       Ok(Json(api::ResolveRune { result }))
@@ -1057,20 +1088,58 @@ impl Server {
       let outputs = index.get_address_info(&address)?;
       let inscriptions = index.get_inscriptions_for_outputs(&outputs)?;
 
-      let mut rune_names = Vec::new();
+      let mut runes = Vec::new();
 
       if let Some(inscription_ids) = inscriptions {
         for inscription_id in inscription_ids {
           let inscription_query = query::Inscription::Id(inscription_id);
           if let Some((info, _, _)) = index.inscription_info(inscription_query, None)? {
-            if let Some(rune) = info.rune {
-              rune_names.push(rune.to_string());
+            if let Some(spaced_rune) = info.rune {
+              // Get rune_id from the rune
+              let rune = spaced_rune.rune;
+              if let Some((rune_id, _entry, _parent)) = index.rune(rune)? {
+                // Get transfer height from satpoint
+                let transfer_txid = info.satpoint.outpoint.txid;
+
+                // Skip unbound or null outpoints
+                if info.satpoint.outpoint == unbound_outpoint()
+                  || info.satpoint.outpoint == OutPoint::null()
+                {
+                  continue;
+                }
+
+                // Get transaction info
+                let tx_info = match index.get_transaction_info(&transfer_txid)? {
+                  Some(tx) => tx,
+                  None => continue,
+                };
+
+                // Get blockhash, skip if unconfirmed
+                let blockhash = match tx_info.blockhash {
+                  Some(hash) => hash,
+                  None => continue,
+                };
+
+                // Get block height
+                let block_info = match index.block_header_info(blockhash)? {
+                  Some(info) => info,
+                  None => continue,
+                };
+
+                let transfer_height = block_info.height as u32;
+
+                runes.push(api::AddressRuneInfo {
+                  rune_id: rune_id.to_string(),
+                  rune_name: spaced_rune.to_string(),
+                  transfer_height,
+                });
+              }
             }
           }
         }
       }
 
-      Ok(Json(api::ResolveAddress { rune_names }))
+      Ok(Json(api::ResolveAddress { runes }))
     })
   }
 

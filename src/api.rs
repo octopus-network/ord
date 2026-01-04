@@ -262,6 +262,10 @@ pub struct Offers {
 pub struct RuneResolution {
   pub address: String,
   pub inscription_id: String,
+  pub rune_id: String,
+  pub etching: String,
+  pub inscription_number: i32,
+  pub transfer_height: u32,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -270,6 +274,13 @@ pub struct ResolveRune {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct AddressRuneInfo {
+  pub rune_id: String,
+  pub rune_name: String,
+  pub transfer_height: u32,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResolveAddress {
-  pub rune_names: Vec<String>,
+  pub runes: Vec<AddressRuneInfo>,
 }
