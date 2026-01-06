@@ -259,28 +259,28 @@ pub struct Offers {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct RuneResolution {
+pub struct BnsRuneInfo {
   pub address: String,
   pub inscription_id: String,
   pub rune_id: String,
   pub etching: String,
   pub inscription_number: i32,
-  pub transfer_height: u32,
+  pub confirmations: u32,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct ResolveRune {
-  pub result: Option<RuneResolution>,
+pub struct BnsRune {
+  pub result: Option<BnsRuneInfo>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct AddressRuneInfo {
+pub struct BnsAddressRuneInfo {
   pub rune_id: String,
   pub rune_name: String,
-  pub transfer_height: u32,
+  pub confirmations: u32,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct ResolveAddress {
-  pub runes: Vec<AddressRuneInfo>,
+pub struct BnsAddress {
+  pub runes: Vec<BnsAddressRuneInfo>,
 }

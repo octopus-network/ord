@@ -248,8 +248,8 @@ impl Server {
         )
         .route("/preview/{inscription_id}", get(Self::preview))
         .route("/rare.txt", get(Self::rare_txt))
-        .route("/resolve_address/{address}", get(Self::resolve_address))
-        .route("/resolve_rune/{rune}", get(Self::resolve_rune))
+        .route("/bns/address/{address}", get(Self::bns_address))
+        .route("/bns/rune/{rune}", get(Self::bns_rune))
         .route("/rune/{rune}", get(Self::rune))
         .route("/runes", get(Self::runes))
         .route("/runes/{page}", get(Self::runes_paginated))
@@ -995,10 +995,10 @@ impl Server {
     })
   }
 
-  async fn resolve_rune(
+  async fn bns_rune(
     Extension(index): Extension<Arc<Index>>,
     Path(DeserializeFromStr(rune_query)): Path<DeserializeFromStr<query::Rune>>,
-  ) -> ServerResult<Json<api::ResolveRune>> {
+  ) -> ServerResult<Json<api::BnsRune>> {
     task::block_in_place(|| {
       if !index.has_rune_index() {
         return Err(ServerError::NotFound(
@@ -1017,16 +1017,16 @@ impl Server {
       };
 
       let Some((rune_id, entry, parent)) = index.rune(rune)? else {
-        return Ok(Json(api::ResolveRune { result: None }));
+        return Ok(Json(api::BnsRune { result: None }));
       };
 
       let Some(parent_id) = parent else {
-        return Ok(Json(api::ResolveRune { result: None }));
+        return Ok(Json(api::BnsRune { result: None }));
       };
 
       let inscription_query = query::Inscription::Id(parent_id);
       let Some((info, _, _)) = index.inscription_info(inscription_query, None)? else {
-        return Ok(Json(api::ResolveRune { result: None }));
+        return Ok(Json(api::BnsRune { result: None }));
       };
 
       // Get the transfer height from the current satpoint
@@ -1056,24 +1056,28 @@ impl Server {
 
       let transfer_height = block_info.height as u32;
 
-      let result = info.address.map(|address| api::RuneResolution {
+      // Get current block height and calculate confirmations
+      let current_height = index.block_count()?;
+      let confirmations = current_height.saturating_sub(transfer_height) + 1;
+
+      let result = info.address.map(|address| api::BnsRuneInfo {
         address,
         inscription_id: parent_id.to_string(),
         rune_id: rune_id.to_string(),
         etching: entry.etching.to_string(),
         inscription_number: info.number,
-        transfer_height,
+        confirmations,
       });
 
-      Ok(Json(api::ResolveRune { result }))
+      Ok(Json(api::BnsRune { result }))
     })
   }
 
-  async fn resolve_address(
+  async fn bns_address(
     Extension(server_config): Extension<Arc<ServerConfig>>,
     Extension(index): Extension<Arc<Index>>,
     Path(address): Path<Address<NetworkUnchecked>>,
-  ) -> ServerResult<Json<api::ResolveAddress>> {
+  ) -> ServerResult<Json<api::BnsAddress>> {
     task::block_in_place(|| {
       if !index.has_address_index() {
         return Err(ServerError::NotFound(
@@ -1089,6 +1093,9 @@ impl Server {
       let inscriptions = index.get_inscriptions_for_outputs(&outputs)?;
 
       let mut runes = Vec::new();
+
+      // Get current block height for confirmations calculation
+      let current_height = index.block_count()?;
 
       if let Some(inscription_ids) = inscriptions {
         for inscription_id in inscription_ids {
@@ -1128,10 +1135,13 @@ impl Server {
 
                 let transfer_height = block_info.height as u32;
 
-                runes.push(api::AddressRuneInfo {
+                // Calculate confirmations
+                let confirmations = current_height.saturating_sub(transfer_height) + 1;
+
+                runes.push(api::BnsAddressRuneInfo {
                   rune_id: rune_id.to_string(),
                   rune_name: spaced_rune.to_string(),
-                  transfer_height,
+                  confirmations,
                 });
               }
             }
@@ -1139,7 +1149,7 @@ impl Server {
         }
       }
 
-      Ok(Json(api::ResolveAddress { runes }))
+      Ok(Json(api::BnsAddress { runes }))
     })
   }
 
