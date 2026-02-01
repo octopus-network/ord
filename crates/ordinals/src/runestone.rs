@@ -4,7 +4,7 @@ mod flag;
 mod message;
 mod tag;
 
-#[derive(Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Default, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Runestone {
   pub edicts: Vec<Edict>,
   pub etching: Option<Etching>,

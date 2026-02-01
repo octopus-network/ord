@@ -1,3 +1,5 @@
+use electrum_client::ElectrumApi;
+use pg::{PG_CHUNK_SIZE, PgDatabase, RsUpdates};
 use {
   self::{
     entry::{
@@ -213,6 +215,8 @@ pub struct Index {
   started: DateTime<Utc>,
   first_index_height: u32,
   unrecoverably_reorged: AtomicBool,
+  pg_database: PgDatabase,
+  electrum_client: electrum_client::Client,
 }
 
 impl Index {
@@ -224,6 +228,10 @@ impl Index {
     settings: &Settings,
     event_sender: Option<tokio::sync::mpsc::Sender<Event>>,
   ) -> Result<Self> {
+    let pg_database = PgDatabase::new();
+    let electrum_config = electrum_client::ConfigBuilder::new().retry(3).build();
+    let electrum_client =
+      electrum_client::Client::from_config("tcp://fulcrum:50001", electrum_config).unwrap();
     let client = settings.bitcoin_rpc_client(None)?;
 
     let path = settings.index().to_owned();
@@ -384,32 +392,34 @@ impl Index {
 
           Self::set_statistic(&mut statistics, Statistic::Runes, 1)?;
 
-          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?.insert(
-            id.store(),
-            RuneEntry {
-              block: id.block,
-              burned: 0,
-              divisibility: 0,
-              etching,
-              terms: Some(Terms {
-                amount: Some(1),
-                cap: Some(u128::MAX),
-                height: (
-                  Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
-                  Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
-                ),
-                offset: (None, None),
-              }),
-              mints: 0,
-              number: 0,
-              premine: 0,
-              spaced_rune: SpacedRune { rune, spacers: 128 },
-              symbol: Some('\u{29C9}'),
-              timestamp: 0,
-              turbo: true,
-            }
-            .store(),
-          )?;
+          let entry = RuneEntry {
+            block: id.block,
+            burned: 0,
+            divisibility: 0,
+            etching,
+            terms: Some(Terms {
+              amount: Some(1),
+              cap: Some(u128::MAX),
+              height: (
+                Some((SUBSIDY_HALVING_INTERVAL * 4).into()),
+                Some((SUBSIDY_HALVING_INTERVAL * 5).into()),
+              ),
+              offset: (None, None),
+            }),
+            mints: 0,
+            number: 0,
+            premine: 0,
+            spaced_rune: SpacedRune { rune, spacers: 128 },
+            symbol: Some('\u{29C9}'),
+            timestamp: 0,
+            turbo: true,
+          };
+
+          tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?
+            .insert(id.store(), entry.store())?;
+
+          let runes = HashMap::from_iter([(id, entry)]);
+          let _ = pg_database.pg_insert_runes(runes);
 
           tx.open_table(TRANSACTION_ID_TO_RUNE)?
             .insert(&etching.store(), rune.store())?;
@@ -469,6 +479,8 @@ impl Index {
       path,
       started: Utc::now(),
       unrecoverably_reorged: AtomicBool::new(false),
+      pg_database,
+      electrum_client,
     })
   }
 
@@ -676,6 +688,7 @@ impl Index {
         outputs_cached: 0,
         outputs_traversed: 0,
         sat_ranges_since_flush: 0,
+        rs_updates: RsUpdates::default(),
       };
 
       match updater.update_index(wtx) {
@@ -2598,6 +2611,116 @@ impl Index {
       ),
       txout,
     )))
+  }
+
+  pub fn update_runes(
+    &self,
+    id_to_entry: &ReadOnlyTable<RuneIdValue, RuneEntryValue>,
+    updated_runes: HashSet<RuneId>,
+  ) -> Result {
+    let runes: Vec<_> = updated_runes
+      .clone()
+      .into_iter()
+      .filter_map(|rune_id| {
+        id_to_entry.get(&rune_id.store()).ok()?.map(|entry| {
+          let entry = RuneEntry::load(entry.value());
+          (rune_id, entry.burned, entry.mints)
+        })
+      })
+      .collect();
+
+    if !runes.is_empty() {
+      self
+        .pg_database
+        .pg_update_runes_chunked(runes, PG_CHUNK_SIZE)?;
+    }
+
+    Ok(())
+  }
+
+  fn wait_for_fulcrum(&self, height: u32) {
+    loop {
+      match self.electrum_client.block_header(height as usize) {
+        Ok(_header) => {
+          break;
+        }
+        Err(err) => {
+          log::error!(
+            "Block at height {} not yet available in electrum server: {}. Will retry in 10 seconds...",
+            height,
+            err
+          );
+        }
+      }
+      std::thread::sleep(std::time::Duration::from_secs(10));
+    }
+  }
+
+  pub fn update_addresses(
+    &self,
+    height: u32,
+    outpoint_to_rune_balances: &ReadOnlyTable<&OutPointValue, &[u8]>,
+    updated_addresses: HashSet<Address>,
+  ) -> Result {
+    let addresses_to_clear: Vec<String> = updated_addresses
+      .iter()
+      .map(|addr| addr.to_string())
+      .collect();
+    self
+      .pg_database
+      .pg_clear_rune_balance_addresses_chunked(addresses_to_clear, PG_CHUNK_SIZE)?;
+
+    self.wait_for_fulcrum(height);
+
+    let mut addresses = Vec::new();
+    for address in updated_addresses.clone() {
+      let unspent_list = self
+        .electrum_client
+        .script_list_unspent(address.script_pubkey().as_script())?;
+      let outputs = unspent_list
+        .into_iter()
+        .map(|unspent| OutPoint::new(unspent.tx_hash, unspent.tx_pos.try_into().unwrap()))
+        .collect::<Vec<OutPoint>>();
+
+      let mut runes = BTreeMap::new();
+
+      // Collect all rune balances for this address
+      for output in &outputs {
+        if let Some(balances) = outpoint_to_rune_balances.get(&output.store())? {
+          let balances_buffer = balances.value();
+          self.aggregate_rune_balances(balances_buffer, &mut runes)?;
+        }
+      }
+
+      // Create address entries for each rune balance
+      for (rune_id, amount) in runes {
+        addresses.push((address.clone(), rune_id, amount));
+      }
+    }
+
+    self
+      .pg_database
+      .pg_upsert_address_rune_balances_chunked(addresses, PG_CHUNK_SIZE)?;
+
+    Ok(())
+  }
+
+  fn aggregate_rune_balances(
+    &self,
+    balances_buffer: &[u8],
+    runes: &mut BTreeMap<RuneId, u128>,
+  ) -> Result<()> {
+    let mut i = 0;
+    while i < balances_buffer.len() {
+      let ((id, amount), length) = Self::decode_rune_balance(&balances_buffer[i..])?;
+      i += length;
+
+      runes
+        .entry(id)
+        .and_modify(|base| *base += amount)
+        .or_insert(amount);
+    }
+    Ok(())
   }
 }
 
